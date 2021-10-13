@@ -9,4 +9,13 @@ except:
 
 torrentFileData = FileInfo(sys.argv[1])
 torrentFileData.extractFileMetaData()
+# print(torrentFileData)
 # print(torrentFileData.infoDictionary[b"files"])
+
+def makeRequest():
+    if "udp://" in torrentFileData.announceURL:
+        pass
+    else:
+        requestMaker = httpTracker(fileName)
+        requestMaker.httpTrackerRequest()
+makeRequest()
