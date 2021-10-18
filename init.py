@@ -1,5 +1,6 @@
 import sys
 from torrentFile import *
+from peerWireProtocol import *
 try:
 
     fileName = sys.argv[1]
@@ -56,6 +57,8 @@ def makeRequest():
         # download
         pass
     else:
-        print("All trackers are useless")
-            
+        print("All trackers are useless")       
 makeRequest()
+
+pwp = PeerWireProtocol(torrentFileData)
+pwp.handshakeRequest()
