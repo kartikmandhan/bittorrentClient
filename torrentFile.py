@@ -18,8 +18,6 @@ from socket import *
     udpTracker
 
 '''
-
-
 class FileInfo:
     def __init__(self, fileName):
         self.fileName = fileName
@@ -76,7 +74,7 @@ class FileInfo:
             for i in fileContent[b"announce-list"]:
                 for j in i:
                     self.announceList.append(j.decode())
-            print(self.announceList)
+            # print(self.announceList)
         if b"files" in self.infoDictionary:
             # multifile torrent
             for file in self.infoDictionary[b"files"]:
@@ -103,7 +101,11 @@ class httpTracker(FileInfo):
         params = {"info_hash": self.infoHash, "peer_id": self.peerID, "port": self.portNo, "uploaded": self.uploaded,
                   "downloaded": self.downloaded, "left": self.lengthOfFileToBeDownloaded, "compact": 1}
         # print(urllib.parse.urlencode(params))
-        announceResponse = requests.get(self.announceURL, params).content
+        try:
+            announceResponse = requests.get(self.announceURL, params).content
+        except:
+            print("Error : request module")
+            return
         trackerResponseDict = bencodepy.decode(announceResponse)
         # print(announceResponse)
         self.seeders = trackerResponseDict[b"complete"]
@@ -114,7 +116,7 @@ class httpTracker(FileInfo):
         self.peerAddresses = []
         for i in allPeers:
             self.peerAddresses.append(self.extractIPAdressandPort(i))
-        # print(self.peerAddresses)
+        print(self.peerAddresses,self.seeders,self.leachers,len(self.peerAddresses))
         # print(allPeers)
 
 
@@ -125,17 +127,24 @@ class udpTracker(FileInfo):
     """
 
     def __init__(self, fileName):
+        self.currentTrackerURL=""
         super().__init__(fileName)
         super().extractFileMetaData()
 
     def udpTrackerRequest(self):
+        if(self.udpTrackerRequest1()):
+            # print("idhar hai")
+            if(self.udpTrackerRequest2()):
+                # print("idhar bhi hai")
+                return True
+        return False
+    def udpTrackerRequest1(self):
         parsedURL = urllib.parse.urlparse(self.announceURL)
         self.connectionSocket = socket(AF_INET, SOCK_DGRAM)
-        # url = parsedURL.netloc.split(":")[0]
+        self.url = parsedURL.netloc.split(":")[0]
         # url = "tracker.kali.org"
-        self.url = "open.stealth.si"
-        self.trackerPort = 80
-        # print(url)
+        self.trackerPort = parsedURL.port
+        # print(self.url,self.trackerPort)
         connectionID = 0x41727101980
         action = 0
         transactionID = random.randint(5, 1000)
@@ -146,28 +155,41 @@ class udpTracker(FileInfo):
         # print(connectionRequestString)
 
         reply = self.udprecvTrackerResponse(connectionRequestString)
-        self.actionID, self.transactionID, self.connectionID = struct.unpack(
-            "!iiq", reply)
+        # print(reply)
+        if reply=="":
+            return False
+        self.actionID, self.transactionID, self.connectionID = struct.unpack("!iiq", reply)
         if(len(reply) < 16 or self.actionID != 0 or transactionID != self.transactionID):
             # error
-            return
-
+            return False
+        return True
+        
+    def udpTrackerRequest2(self): 
         announcePacket = self.createAnnouncePacket()
         reply = self.udprecvTrackerResponse(announcePacket)
+        if reply=="":
+            return False
+        
         announceActionID, transactionID, self.interval, self.leechers, self.seeders = struct.unpack(
             "!iiiii", reply[:20])
 
         if(len(reply) < 20 or announceActionID != 1 or transactionID != self.transactionID):
             # error
-            return
+            return False
 
         self.trackerPeers = reply[20:]
+        
         allPeers = self._generate_peers()
+        # if tracker didnt has any peers
+        if len(allPeers)==0:
+            return False
         self.peerAddresses = []
         for i in allPeers:
             self.peerAddresses.append(self.extractIPAdressandPort(i))
-        # print(self.peerAddresses)
-        # print(len(self.peerAddresses), self.seeders, self.leechers)
+        print(self.peerAddresses)
+
+        print(len(self.peerAddresses), self.seeders, self.leechers)
+        return True 
 
     def udprecvTrackerResponse(self, message):
         self.connectionSocket.settimeout(5)
@@ -176,7 +198,8 @@ class udpTracker(FileInfo):
             reply, trackerAdress = self.connectionSocket.recvfrom(2048)
 
         except:
-            print("err")
+            print("Error in udprecvTrackerResponse")
+            return ""
         return reply
 
     def createAnnouncePacket(self):

@@ -12,14 +12,50 @@ torrentFileData.extractFileMetaData()
 # print(torrentFileData)
 # print(torrentFileData.infoDictionary[b"files"])
 
+def tryAllTrackerURLs(udpRequestMaker,httpRequestMaker):
+    didWeRecieveAddresses=False
+    didUDPAnswer=-1
+    for url in torrentFileData.announceList:
+        if "udp://" in url:
+            udpRequestMaker.announceURL = url    
+            if(udpRequestMaker.udpTrackerRequest()):
+                didWeRecieveAddresses=True
+                didUDPAnswer=1
+                break
+        else:
+            httpRequestMaker.announceURL= url    
+            httpRequestMaker.httpTrackerRequest()
+            didWeRecieveAddresses = True
+            # http answered
+            didUDPAnswer = 2
+            break
+    return (didWeRecieveAddresses,didUDPAnswer)
 
 def makeRequest():
-    if "udp://" in torrentFileData.announceURL:
-        requestMaker = udpTracker(fileName)
-        requestMaker.udpTrackerRequest()
+    udpRequestMaker = udpTracker(fileName)
+    httpRequestMaker = httpTracker(fileName)
+    didWeRecieveAddresses=False
+    didUDPAnswer=-1
+    print(torrentFileData.announceList)
+    if len(torrentFileData.announceList)>0:
+        for i in range(5):
+            didWeRecieveAddresses, didUDPAnswer = tryAllTrackerURLs(udpRequestMaker, httpRequestMaker)
+            if(didWeRecieveAddresses):
+                break
     else:
-        requestMaker = httpTracker(fileName)
-        requestMaker.httpTrackerRequest()
-
-
+        if "udp://" in torrentFileData.announceURL:
+            if(udpRequestMaker.udpTrackerRequest()):
+                didWeRecieveAddresses=True
+                didUDPAnswer=1
+        else:
+            httpRequestMaker.httpTrackerRequest()
+            didWeRecieveAddresses = True
+            # http answered
+            didUDPAnswer = 2
+    if(didWeRecieveAddresses):
+        # download
+        pass
+    else:
+        print("All trackers are useless")
+            
 makeRequest()
