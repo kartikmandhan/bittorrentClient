@@ -1,3 +1,4 @@
+# dictionary model of tracker response is yet to implement
 import sys
 from torrentFile import *
 from peerWireProtocol import *
@@ -13,52 +14,63 @@ torrentFileData.extractFileMetaData()
 # print(torrentFileData)
 # print(torrentFileData.infoDictionary[b"files"])
 
-def tryAllTrackerURLs(udpRequestMaker,httpRequestMaker):
-    didWeRecieveAddresses=False
-    didUDPAnswer=-1
+
+def tryAllTrackerURLs(udpRequestMaker, httpRequestMaker):
+    didWeRecieveAddresses = False
+    didUDPAnswer = -1
     for url in torrentFileData.announceList:
         if "udp://" in url:
-            udpRequestMaker.announceURL = url    
+            udpRequestMaker.announceURL = url
             if(udpRequestMaker.udpTrackerRequest()):
-                didWeRecieveAddresses=True
-                didUDPAnswer=1
+                didWeRecieveAddresses = True
+                didUDPAnswer = 1
                 break
         else:
-            httpRequestMaker.announceURL= url    
+            httpRequestMaker.announceURL = url
             httpRequestMaker.httpTrackerRequest()
             didWeRecieveAddresses = True
             # http answered
             didUDPAnswer = 2
             break
-    return (didWeRecieveAddresses,didUDPAnswer)
+    return (didWeRecieveAddresses, didUDPAnswer)
+
 
 def makeRequest():
     udpRequestMaker = udpTracker(fileName)
     httpRequestMaker = httpTracker(fileName)
-    didWeRecieveAddresses=False
-    didUDPAnswer=-1
+    didWeRecieveAddresses = False
+    didUDPAnswer = -1
     print(torrentFileData.announceList)
-    if len(torrentFileData.announceList)>0:
+    if len(torrentFileData.announceList) > 0:
         for i in range(5):
-            didWeRecieveAddresses, didUDPAnswer = tryAllTrackerURLs(udpRequestMaker, httpRequestMaker)
+            didWeRecieveAddresses, didUDPAnswer = tryAllTrackerURLs(
+                udpRequestMaker, httpRequestMaker)
             if(didWeRecieveAddresses):
                 break
     else:
         if "udp://" in torrentFileData.announceURL:
             if(udpRequestMaker.udpTrackerRequest()):
-                didWeRecieveAddresses=True
-                didUDPAnswer=1
+                didWeRecieveAddresses = True
+                didUDPAnswer = 1
         else:
             httpRequestMaker.httpTrackerRequest()
             didWeRecieveAddresses = True
             # http answered
             didUDPAnswer = 2
+
     if(didWeRecieveAddresses):
-        # download
+        if didUDPAnswer == 1:
+            pwp = PeerWireProtocol(udpRequestMaker)
+
+        elif didUDPAnswer == 2:
+            pwp = PeerWireProtocol(httpRequestMaker)
+    if(pwp.handshakeRequest() == False):
+        # close connection
         pass
     else:
-        print("All trackers are useless")       
+        print("All trackers are useless")
+
+
 makeRequest()
 
-pwp = PeerWireProtocol(torrentFileData)
-pwp.handshakeRequest()
+# pwp = PeerWireProtocol(torrentFileData)

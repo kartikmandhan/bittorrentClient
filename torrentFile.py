@@ -18,6 +18,8 @@ from socket import *
     udpTracker
 
 '''
+
+
 class FileInfo:
     def __init__(self, fileName):
         self.fileName = fileName
@@ -116,7 +118,8 @@ class httpTracker(FileInfo):
         self.peerAddresses = []
         for i in allPeers:
             self.peerAddresses.append(self.extractIPAdressandPort(i))
-        print(self.peerAddresses,self.seeders,self.leachers,len(self.peerAddresses))
+        print(self.peerAddresses, self.seeders,
+              self.leachers, len(self.peerAddresses))
         # print(allPeers)
 
 
@@ -127,7 +130,7 @@ class udpTracker(FileInfo):
     """
 
     def __init__(self, fileName):
-        self.currentTrackerURL=""
+        self.currentTrackerURL = ""
         super().__init__(fileName)
         super().extractFileMetaData()
 
@@ -138,6 +141,7 @@ class udpTracker(FileInfo):
                 # print("idhar bhi hai")
                 return True
         return False
+
     def udpTrackerRequest1(self):
         parsedURL = urllib.parse.urlparse(self.announceURL)
         self.connectionSocket = socket(AF_INET, SOCK_DGRAM)
@@ -156,20 +160,21 @@ class udpTracker(FileInfo):
 
         reply = self.udprecvTrackerResponse(connectionRequestString)
         # print(reply)
-        if reply=="":
+        if reply == "":
             return False
-        self.actionID, self.transactionID, self.connectionID = struct.unpack("!iiq", reply)
+        self.actionID, self.transactionID, self.connectionID = struct.unpack(
+            "!iiq", reply)
         if(len(reply) < 16 or self.actionID != 0 or transactionID != self.transactionID):
             # error
             return False
         return True
-        
-    def udpTrackerRequest2(self): 
+
+    def udpTrackerRequest2(self):
         announcePacket = self.createAnnouncePacket()
         reply = self.udprecvTrackerResponse(announcePacket)
-        if reply=="":
+        if reply == "":
             return False
-        
+
         announceActionID, transactionID, self.interval, self.leechers, self.seeders = struct.unpack(
             "!iiiii", reply[:20])
 
@@ -178,10 +183,10 @@ class udpTracker(FileInfo):
             return False
 
         self.trackerPeers = reply[20:]
-        
+
         allPeers = self._generate_peers()
         # if tracker didnt has any peers
-        if len(allPeers)==0:
+        if len(allPeers) == 0:
             return False
         self.peerAddresses = []
         for i in allPeers:
@@ -189,7 +194,7 @@ class udpTracker(FileInfo):
         print(self.peerAddresses)
 
         print(len(self.peerAddresses), self.seeders, self.leechers)
-        return True 
+        return True
 
     def udprecvTrackerResponse(self, message):
         self.connectionSocket.settimeout(5)
@@ -198,7 +203,7 @@ class udpTracker(FileInfo):
             reply, trackerAdress = self.connectionSocket.recvfrom(2048)
 
         except:
-            print("Error in udprecvTrackerResponse")
+            print("timeout in udprecvTrackerResponse")
             return ""
         return reply
 
