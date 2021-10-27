@@ -8,6 +8,8 @@ class PeerWireProtocol:
         self.myPeerID = torrentFileInfo.peerID
         self.numberOfPieces = len(torrentFileInfo.hashOfPieces)
         self.peerAddresses = torrentFileInfo.peerAddresses
+        # timepass nikal dege
+        self.torreFileInfo = torrentFileInfo
 
     def _generateInterestedMsg(self):
         interested = struct.pack("!i", 1)
@@ -33,23 +35,23 @@ class PeerWireProtocol:
         unchoke += struct.pack("!b", 1)
         return unchoke
 
-    def _generaterRequestMsg(self, index, begin, length):
+    def _generateRequestMsg(self, index, begin, length):
         request = struct.pack("!i", 13)
         request += struct.pack("!b", 6)
-        request += struct.pack("!b", index)
+        request += struct.pack("!i", index)
         request += struct.pack("!i", begin)
         request += struct.pack("!i", length)
         return request
 
-    def _generaterPieceMsg(self, index, begin, block):
+    def _generatePieceMsg(self, index, begin, block):
         piece = struct.pack("!i", 13 + len(block))
         piece += struct.pack("!b", 7)
-        piece += struct.pack("!b", index)
+        piece += struct.pack("!i", index)
         piece += struct.pack("!i", begin)
         piece += block
         return piece
 
-    def _generaterBitFieldMsg(self, x, payload):
+    def _generateBitFieldMsg(self, x, payload):
         bitField = struct.pack("!i", 13 + len(payload))
         bitField += struct.pack("!b", 5)
         bitField += payload
@@ -64,7 +66,7 @@ class PeerWireProtocol:
     def _generateCancelMsg(self, index, begin, length):
         cancel = struct.pack("!i", 13)
         cancel += struct.pack("!b", 8)
-        cancel += struct.pack("!b", index)
+        cancel += struct.pack("!i", index)
         cancel += struct.pack("!i", begin)
         cancel += struct.pack("!i", length)
         return cancel
@@ -80,7 +82,7 @@ class PeerWireProtocol:
         for add in self.peerAddresses:
             # peerAdress = ('66.212.20.8', 6881)
             connectionSocket = socket(AF_INET, SOCK_STREAM)
-            connectionSocket.settimeout(10)
+            connectionSocket.settimeout(5)
             try:
                 connectionSocket.connect(add)
                 break
@@ -94,9 +96,9 @@ class PeerWireProtocol:
             try:
                 response += connectionSocket.recv(4096)
             except:
-                print("timeout")
+                print("timeout1")
                 break
-        print("response", response)
+        print("Handshake Response :", response)
         print()
         connectionSocket.settimeout(None)
         recvdinfoHash, handshakeLen = self.decodeHandshakeResponse(response)
@@ -105,8 +107,9 @@ class PeerWireProtocol:
             # error handshake failed
             print("Info Hash unmatched")
             return False
-        self.decodeMsg(response[handshakeLen:])
 
+        peerMessages = self.decodeMsg(response[handshakeLen:])
+        print(peerMessages)
         # lenPrefix = struct.unpack(
         #     "!i", response[handshakeLen:handshakeLen + 4])[0]
         # ID = struct.unpack("!b", response[handshakeLen+4:handshakeLen + 5])
@@ -120,14 +123,33 @@ class PeerWireProtocol:
 
         # i += 1
         print(response1)
-        if len(response1) > 0:
-            lenPrefix = struct.unpack("!i", response1[:4])[0]
-            ID = struct.unpack("!b", response1[4:5])
-            ID = int.from_bytes(ID, "big")
-            print(lenPrefix, ID)
-        print("number of pieces", self.numberOfPieces)
+        # if len(response1) > 0:
+        #     lenPrefix = struct.unpack("!i", response1[:4])[0]
+        #     ID = struct.unpack("!b", response1[4:5])
+        #     ID = int.from_bytes(ID, "big")
+        #     print(lenPrefix, ID)
+
+        peerMessages = self.decodeMsg(response1)
+        print(peerMessages)
+
+        print("Number of pieces :", self.numberOfPieces)
         # peer.send(handshakePacket)
         # handshakeResponse = peer.recv()
+        connectionSocket.send(self._generateRequestMsg(0, 0, 2 ** 14))
+        block = b''
+        connectionSocket.settimeout(10)
+        while(1):
+            try:
+                block += connectionSocket.recv(16384)
+            except:
+                print("timeout")
+                break
+        connectionSocket.settimeout(None)
+        print("Block size :", len(block))
+        print("Piece Size : ", self.torreFileInfo.pieceLength)
+        # print(block)
+        peerMessages = self.decodeMsg(block)
+        print(peerMessages)
         return True
 
     def decodeHandshakeResponse(self, response):
@@ -155,36 +177,72 @@ class PeerWireProtocol:
         return handshakePacket
 
     def decodeMsg(self, response):
-        lenPrefix = struct.unpack("!i", response[:4])[0]
-        if(lenPrefix == 0):
-            return
-        ID = struct.unpack("!b", response[4:5])
-        ID = int.from_bytes(ID, "big")
         # len(lenPrefix)+ 1 byte of Id==5
         payloadStartIndex = 5
-        if ID == 0:
-            # choke
-            pass
-        if ID == 1:
-            # unchoke
-            pass
-        if ID == 2:
-            # interested
-            pass
-        if ID == 3:
-            #not interested
-            pass
-        if ID == 4:
-            # have
-            pass
-        if ID == 5:
-            # since lenPrefix=lenofpayload+ 1 byte of ID
-            bitfield = response[payloadStartIndex:(lenPrefix-1) +
-                                payloadStartIndex]
-            print("Bitfield : \n", len(bitfield)*8)
+        current = 0
+        peerMessages = {}
+        while(current != len(response)):
+            if(len(response) < 4):
+                return {"error": "Invalid Response"}
+            lenPrefix = struct.unpack("!i", response[current: current + 4])[0]
+            if(lenPrefix == 0):
+                return
+            ID = struct.unpack("!b", response[current + 4: current + 5])
+            ID = int.from_bytes(ID, "big")
 
-        # b'\x13BitTorrent protocol\x00\x00\x00\x00\x00\x10\x00\x05d\xa9\x80\xab\xe6\xe4H"k\xb90\xba\x06\x15\x92\xe4L7\x81\xa1-TR2940-dawyxs9ci3cc\x00\x00\x05B\x05\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x80\x00\x00\x00\x01\x01'
-
-        # 19 b'BitTorrent protocol' 1048581 b'd\xa9\x80\xab\xe6\xe4H"k\xb90\xba\x06\x15\x92\xe4L7\x81\xa1' b'-TR2940-dawyxs9ci3cc'
-        # 1346 5
-        # b''
+            if ID == 0:
+                # choke
+                peerMessages["keepAlive"] = True
+                current += payloadStartIndex
+            if ID == 1:
+                # unchoke
+                peerMessages["unchoke"] = True
+                current += payloadStartIndex
+            if ID == 2:
+                # interested
+                peerMessages["interested"] = True
+                current += payloadStartIndex
+            if ID == 3:
+                # not interested
+                peerMessages["notInterested"] = True
+                current += payloadStartIndex
+            if ID == 4:
+                # have
+                pieceIndex = struct.unpack(
+                    "!i", response[current + payloadStartIndex: current + payloadStartIndex + 4])
+                peerMessages["have"] = pieceIndex
+                current += (lenPrefix-1) + payloadStartIndex
+            if ID == 5:
+                # since lenPrefix=lenofpayload+ 1 byte of ID
+                bitfield = response[current + payloadStartIndex:(lenPrefix-1) +
+                                    current + payloadStartIndex]
+                # print("Bitfield : \n", len(bitfield)*8)
+                peerMessages["bitfield"] = bitfield
+                # return ("bitfield", bitfield)
+                current += (lenPrefix-1) + payloadStartIndex
+            if ID == 6:
+                # Request
+                pass
+            if ID == 7:
+                # piece
+                payload = response[current + payloadStartIndex:(
+                    lenPrefix-1) + current + payloadStartIndex]
+                index, begin = struct.unpack("!ii", payload[:8])
+                block = payload[8:]
+                peerMessages["piece"] = [index, begin, block]
+                # return ("piece", [index, begin, block])
+                current += (lenPrefix-1) + payloadStartIndex
+            if ID == 8:
+                payload = response[current + payloadStartIndex:(
+                    lenPrefix-1) + current + payloadStartIndex]
+                index, begin = struct.unpack("!ii", payload[:8])
+                length = payload[8:]
+                peerMessages["cancel"] = [index, begin, length]
+                # return ("piece", [index, begin, block])
+                current += (lenPrefix-1) + payloadStartIndex
+            if ID == 9:
+                listenPort = struct.unpack(
+                    "!h", response[current + payloadStartIndex:current + payloadStartIndex + 2])
+                peerMessages["port"] = listenPort
+                current += (lenPrefix-1) + payloadStartIndex
+        return peerMessages
