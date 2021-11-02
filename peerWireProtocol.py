@@ -2,15 +2,9 @@ import struct
 from socket import *
 
 
-class PeerWireProtocol:
-    def __init__(self, torrentFileInfo):
-        self.infoHash = torrentFileInfo.infoHash
-        self.myPeerID = torrentFileInfo.peerID
-        self.numberOfPieces = len(torrentFileInfo.hashOfPieces)
-        self.peerAddresses = torrentFileInfo.peerAddresses
-        # timepass nikal dege
-        self.torreFileInfo = torrentFileInfo
 
+class PeerWireProtocol:
+    
     def _generateInterestedMsg(self):
         interested = struct.pack("!i", 1)
         interested += struct.pack("!b", 2)
@@ -35,7 +29,8 @@ class PeerWireProtocol:
         unchoke += struct.pack("!b", 1)
         return unchoke
 
-    def _generateRequestMsg(self, index, begin, length):
+    def _generateRequestMsg(self, argument):
+        index, begin, length=argument
         request = struct.pack("!i", 13)
         request += struct.pack("!b", 6)
         request += struct.pack("!i", index)
@@ -51,7 +46,7 @@ class PeerWireProtocol:
         piece += block
         return piece
 
-    def _generateBitFieldMsg(self, x, payload):
+    def _generateBitFieldMsg(self, payload):
         bitField = struct.pack("!i", 13 + len(payload))
         bitField += struct.pack("!b", 5)
         bitField += payload
@@ -76,104 +71,17 @@ class PeerWireProtocol:
         port += struct.pack("!b", 9)
         port += struct.pack("!h", listenPort)
         return port
+    
 
-    def handshakeRequest(self):
-        handshakePacket = self.makeHandshakePacket()
-        for add in self.peerAddresses:
-            # peerAdress = ('66.212.20.8', 6881)
-            connectionSocket = socket(AF_INET, SOCK_STREAM)
-            connectionSocket.settimeout(5)
-            try:
-                connectionSocket.connect(add)
-                break
-            except:
-                connectionSocket.close()
-                print("Faltu peer")
-                continue
-        connectionSocket.send(handshakePacket)
-        response = b""
-        while(1):
-            try:
-                response += connectionSocket.recv(4096)
-            except:
-                print("timeout1")
-                break
-        print("Handshake Response :", response)
-        print()
-        connectionSocket.settimeout(None)
-        recvdinfoHash, handshakeLen = self.decodeHandshakeResponse(response)
-        # print("my infohash", self.infoHash)
-        if(recvdinfoHash != self.infoHash):
-            # error handshake failed
-            print("Info Hash unmatched")
-            return False
-
-        peerMessages = self.decodeMsg(response[handshakeLen:])
-        print(peerMessages)
-        # lenPrefix = struct.unpack(
-        #     "!i", response[handshakeLen:handshakeLen + 4])[0]
-        # ID = struct.unpack("!b", response[handshakeLen+4:handshakeLen + 5])
-        # ID = int.from_bytes(ID, "big")
-        # # if id==5 then bitfield
-        # print(lenPrefix, ID)
-        connectionSocket.send(self._generateInterestedMsg())
-        # i = 0
-        # while(i < 2):
-        response1 = connectionSocket.recv(4096)
-
-        # i += 1
-        print(response1)
-        # if len(response1) > 0:
-        #     lenPrefix = struct.unpack("!i", response1[:4])[0]
-        #     ID = struct.unpack("!b", response1[4:5])
-        #     ID = int.from_bytes(ID, "big")
-        #     print(lenPrefix, ID)
-
-        peerMessages = self.decodeMsg(response1)
-        print(peerMessages)
-
-        print("Number of pieces :", self.numberOfPieces)
-        # peer.send(handshakePacket)
-        # handshakeResponse = peer.recv()
-        connectionSocket.send(self._generateRequestMsg(0, 0, 2 ** 14))
-        block = b''
-        connectionSocket.settimeout(10)
-        while(1):
-            try:
-                block += connectionSocket.recv(16384)
-            except:
-                print("timeout")
-                break
-        connectionSocket.settimeout(None)
-        print("Block size :", len(block))
-        print("Piece Size : ", self.torreFileInfo.pieceLength)
-        # print(block)
-        peerMessages = self.decodeMsg(block)
-        print(peerMessages)
-        return True
-
-    def decodeHandshakeResponse(self, response):
-        pstrlen = struct.unpack("!b", response[:1])
-        pstrlen = int.from_bytes(pstrlen, 'big')
-        pstr = struct.unpack("!19s", response[1: pstrlen + 1])[0]
-        reserved = struct.unpack("!q", response[pstrlen + 1:pstrlen + 9])[0]
-        recvdinfoHash = struct.unpack(
-            "!20s", response[pstrlen + 9:pstrlen + 29])[0]
-        # recvdinfoHash = recvdinfoHash.decode()
-        peerID = struct.unpack(
-            "!20s", response[pstrlen + 29:pstrlen + 49])[0]
-        print(pstrlen, pstr, reserved, recvdinfoHash, peerID)
-        return (recvdinfoHash, pstrlen + 49)
-
-    def makeHandshakePacket(self):
+    def makeHandshakePacket(self, infoHash, myPeerID):
         pstr = "BitTorrent protocol"
         pstrlen = len(pstr)
         reserved = 0
         handshakePacket = struct.pack("!b", pstrlen)
         handshakePacket += struct.pack("!19s", pstr.encode())
         handshakePacket += struct.pack("!q", reserved)
-        handshakePacket += struct.pack("!20s", self.infoHash)
-        handshakePacket += struct.pack("!20s", self.myPeerID.encode())
+        handshakePacket += struct.pack("!20s", infoHash)
+        handshakePacket += struct.pack("!20s", myPeerID.encode())
         return handshakePacket
 
     def decodeMsg(self, response):
@@ -246,3 +154,143 @@ class PeerWireProtocol:
                 peerMessages["port"] = listenPort
                 current += (lenPrefix-1) + payloadStartIndex
         return peerMessages
+
+
+class Peer(PeerWireProtocol):
+    def __init__(self, IP, port, torrentFileInfo):
+        self.infoHash = torrentFileInfo.infoHash
+        self.myPeerID = torrentFileInfo.peerID
+        self.numberOfPieces = len(torrentFileInfo.hashOfPieces)
+        self.peerAddresses = torrentFileInfo.peerAddresses
+        # timepass nikal dege
+        self.torreFileInfo = torrentFileInfo
+        self.IP=IP
+        self.port=port
+        # initial state is client not interested
+        self.am_choking=True
+        self.am_interested=False
+        self.peer_choking=True
+        self.peer_interested=False
+        self.bitfield=0
+        self.connectionSocket=socket(AF_INET,SOCK_STREAM)
+        self.isHandshakeDone=False
+        # since makeConnectiona doHandshake Both require timeout
+        self.connectionSocket.settimeout(10)
+
+    def decodeHandshakeResponse(self, response):
+        pstrlen = struct.unpack("!b", response[:1])
+        pstrlen = int.from_bytes(pstrlen, 'big')
+        pstr = struct.unpack("!19s", response[1: pstrlen + 1])[0]
+        reserved = struct.unpack("!q", response[pstrlen + 1:pstrlen + 9])[0]
+        recvdinfoHash = struct.unpack(
+            "!20s", response[pstrlen + 9:pstrlen + 29])[0]
+        # recvdinfoHash = recvdinfoHash.decode()
+        peerID = struct.unpack(
+            "!20s", response[pstrlen + 29:pstrlen + 49])[0]
+        print(pstrlen, pstr, reserved, recvdinfoHash, peerID)
+        return (recvdinfoHash, pstrlen + 49)
+    def makeConnection(self):
+        
+        try:
+            self.connectionSocket.connect((self.IP, self.port))
+            return True
+        except:
+            print("Unable Establish TCP Connection")
+            return False
+    def doHandshake(self):
+        if(self.makeConnection() and not self.isHandshakeDone):
+            handshakePacket = self.makeHandshakePacket(self.infoHash, self.myPeerID) 
+            self.connectionSocket.send(handshakePacket)
+            handshakeResponse = b""
+            try:
+                HANDSHAKE_PACKET_LENGTH=68
+                handshakeResponse = self.connectionSocket.recv(HANDSHAKE_PACKET_LENGTH)
+                # print("Handshake Response :", handshakeResponse, len(handshakeResponse))
+                recvdinfoHash, handshakeLen = self.decodeHandshakeResponse(handshakeResponse)
+                # print("my infohash", self.infoHash)
+                if(recvdinfoHash == self.infoHash):
+                    self.isHandshakeDone=True
+                    print("Info Hash matched")
+                    return True
+                else:
+                    self.connectionSocket.close()
+                    print("Received Incorrect Info Hash")
+                    return False
+            except Exception as errorMsg:
+                self.connectionSocket.close()
+                print("Error in doHandshake : " ,errorMsg)
+                return False
+        return False   
+    
+        
+    def sendMsg(self, ID=None,optional=None):
+        if ID == None:
+            self.connectionSocket.send(self._generateKeepAliveMsg())
+        elif ID == 0:
+            self.connectionSocket.send(self._generateChokeMsg())
+        elif ID == 1:
+            self.connectionSocket.send(self._generateUnchokeMsg())
+        elif ID == 2:
+            self.connectionSocket.send(self._generateInterestedMsg())
+        elif ID == 3:
+            self.connectionSocket.send(self._generateNotInterestedMsg())
+        elif ID == 4:
+            self.connectionSocket.send(self._generateHaveMsg(optional))
+        elif ID == 5:
+            self.connectionSocket.send(self._generateBitFieldMsg())
+        elif ID == 6:
+            self.connectionSocket.send(self._generateRequestMsg(optional))
+        elif ID == 7:
+            self.connectionSocket.send(self._generatePieceMsg(optional))
+        elif ID == 8:
+            self.connectionSocket.send(self._generateCancelMsg())
+        elif ID == 9:
+            self.connectionSocket.send(self._generatePortMsg())
+
+    def scraped(self):
+        # i = 0
+        # while(i < 2):
+        response1 = self.connectionSocket.recv(4096)
+
+        # i += 1
+        print(response1)
+        # if len(response1) > 0:
+        #     lenPrefix = struct.unpack("!i", response1[:4])[0]
+        #     ID = struct.unpack("!b", response1[4:5])
+        #     ID = int.from_bytes(ID, "big")
+        #     print(lenPrefix, ID)
+
+        peerMessages = self.decodeMsg(response1)
+        print(peerMessages)
+
+        print("Number of pieces :", self.numberOfPieces)
+        # peer.send(handshakePacket)
+        # handshakeResponse = peer.recv()
+        self.connectionSocket.send(self._generateRequestMsg(0, 0, 2 ** 14))
+        block = b''
+        self.connectionSocket.settimeout(10)
+        while(1):
+            try:
+                block += self.connectionSocket.recv(16384)
+            except:
+                print("timeout")
+                break
+        self.connectionSocket.settimeout(None)
+        print("Block size :", len(block))
+        print("Piece Size : ", self.torreFileInfo.pieceLength)
+        # print(block)
+        peerMessages = self.decodeMsg(block)
+        print(peerMessages)
+        return True
+    
+    def receiveMsg(self):
+        response = b''
+        while(1):
+            try :
+                response += self.connectionSocket.recv(4096)
+            except timeout:
+                break
+            except Exception as errorMsg :
+                print("Error in receiveMsg : ", errorMsg)
+        return response
+
