@@ -2,9 +2,8 @@ import struct
 from socket import *
 
 
-
 class PeerWireProtocol:
-    
+
     def _generateInterestedMsg(self):
         interested = struct.pack("!i", 1)
         interested += struct.pack("!b", 2)
@@ -30,7 +29,7 @@ class PeerWireProtocol:
         return unchoke
 
     def _generateRequestMsg(self, argument):
-        index, begin, length=argument
+        index, begin, length = argument
         request = struct.pack("!i", 13)
         request += struct.pack("!b", 6)
         request += struct.pack("!i", index)
@@ -71,7 +70,6 @@ class PeerWireProtocol:
         port += struct.pack("!b", 9)
         port += struct.pack("!h", listenPort)
         return port
-    
 
     def makeHandshakePacket(self, infoHash, myPeerID):
         pstr = "BitTorrent protocol"
@@ -164,16 +162,16 @@ class Peer(PeerWireProtocol):
         self.peerAddresses = torrentFileInfo.peerAddresses
         # timepass nikal dege
         self.torreFileInfo = torrentFileInfo
-        self.IP=IP
-        self.port=port
+        self.IP = IP
+        self.port = port
         # initial state is client not interested
-        self.am_choking=True
-        self.am_interested=False
-        self.peer_choking=True
-        self.peer_interested=False
-        self.bitfield=0
-        self.connectionSocket=socket(AF_INET,SOCK_STREAM)
-        self.isHandshakeDone=False
+        self.am_choking = True
+        self.am_interested = False
+        self.peer_choking = True
+        self.peer_interested = False
+        self.bitfield = 0
+        self.connectionSocket = socket(AF_INET, SOCK_STREAM)
+        self.isHandshakeDone = False
         # since makeConnectiona doHandshake Both require timeout
         self.connectionSocket.settimeout(10)
 
@@ -189,27 +187,32 @@ class Peer(PeerWireProtocol):
             "!20s", response[pstrlen + 29:pstrlen + 49])[0]
         print(pstrlen, pstr, reserved, recvdinfoHash, peerID)
         return (recvdinfoHash, pstrlen + 49)
+
     def makeConnection(self):
-        
+
         try:
             self.connectionSocket.connect((self.IP, self.port))
             return True
         except:
             print("Unable Establish TCP Connection")
             return False
+
     def doHandshake(self):
         if(self.makeConnection() and not self.isHandshakeDone):
-            handshakePacket = self.makeHandshakePacket(self.infoHash, self.myPeerID) 
+            handshakePacket = self.makeHandshakePacket(
+                self.infoHash, self.myPeerID)
             self.connectionSocket.send(handshakePacket)
             handshakeResponse = b""
             try:
-                HANDSHAKE_PACKET_LENGTH=68
-                handshakeResponse = self.connectionSocket.recv(HANDSHAKE_PACKET_LENGTH)
+                HANDSHAKE_PACKET_LENGTH = 68
+                handshakeResponse = self.connectionSocket.recv(
+                    HANDSHAKE_PACKET_LENGTH)
                 # print("Handshake Response :", handshakeResponse, len(handshakeResponse))
-                recvdinfoHash, handshakeLen = self.decodeHandshakeResponse(handshakeResponse)
+                recvdinfoHash, handshakeLen = self.decodeHandshakeResponse(
+                    handshakeResponse)
                 # print("my infohash", self.infoHash)
                 if(recvdinfoHash == self.infoHash):
-                    self.isHandshakeDone=True
+                    self.isHandshakeDone = True
                     print("Info Hash matched")
                     return True
                 else:
@@ -218,12 +221,11 @@ class Peer(PeerWireProtocol):
                     return False
             except Exception as errorMsg:
                 self.connectionSocket.close()
-                print("Error in doHandshake : " ,errorMsg)
+                print("Error in doHandshake : ", errorMsg)
                 return False
-        return False   
-    
-        
-    def sendMsg(self, ID=None,optional=None):
+        return False
+
+    def sendMsg(self, ID=None, optional=None):
         if ID == None:
             self.connectionSocket.send(self._generateKeepAliveMsg())
         elif ID == 0:
@@ -282,15 +284,23 @@ class Peer(PeerWireProtocol):
         peerMessages = self.decodeMsg(block)
         print(peerMessages)
         return True
-    
+
     def receiveMsg(self):
         response = b''
         while(1):
-            try :
+            try:
                 response += self.connectionSocket.recv(4096)
             except timeout:
                 break
-            except Exception as errorMsg :
+            except Exception as errorMsg:
                 print("Error in receiveMsg : ", errorMsg)
         return response
 
+    def extractBitField(self, bitfieldString):
+        self.bitfield = set()
+        for i, byte in enumerate(bitfieldString):
+            for j in range(8):
+                if ((byte >> j) & 1):
+                    # since we are evaluating each bit from right to left
+                    pieceNumber = i*8+7-j
+                    self.bitfield.add(pieceNumber)

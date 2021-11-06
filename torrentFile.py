@@ -34,6 +34,7 @@ class FileInfo:
         self.uploaded = 0
         self.portNo = 6885
         self.announceList = []
+        self.numberOfPieces = 0
 
     def extractIPAdressandPort(self, ipAndPortString):
         port = int.from_bytes(ipAndPortString[-2:], "big")
@@ -60,6 +61,7 @@ class FileInfo:
         previous = 0
         for i in range(20, len(self.pieces) + 20, 20):
             self.hashOfPieces.append(self.pieces[previous:i])
+            self.numberOfPieces += 1
             previous = i
 
     def extractFileMetaData(self):
