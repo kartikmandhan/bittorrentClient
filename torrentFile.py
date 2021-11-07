@@ -34,6 +34,7 @@ class FileInfo:
         self.uploaded = 0
         self.portNo = 6885
         self.announceList = []
+        self.peerAddresses = []
         self.numberOfPieces = 0
 
     def extractIPAdressandPort(self, ipAndPortString):
@@ -111,17 +112,28 @@ class httpTracker(FileInfo):
             print("Error : request module")
             return
         trackerResponseDict = bencodepy.decode(announceResponse)
-        # print(announceResponse)
-        self.seeders = trackerResponseDict[b"complete"]
-        self.leachers = trackerResponseDict[b"incomplete"]
-        self.trackerInterval = trackerResponseDict[b"interval"]
+        print(trackerResponseDict)
+
+        # if 'complete' in tracekerResponseDict:
+        if b'complete' in trackerResponseDict:
+            self.seeders = trackerResponseDict[b"complete"]
+        if b'incomplete' in trackerResponseDict:
+            self.leachers = trackerResponseDict[b"incomplete"]
+        if b'interval' in trackerResponseDict:
+            self.trackerInterval = trackerResponseDict[b"interval"]
+
         self.trackerPeers = trackerResponseDict[b"peers"]
-        allPeers = self._generate_peers()
-        self.peerAddresses = []
-        for i in allPeers:
-            self.peerAddresses.append(self.extractIPAdressandPort(i))
-        print(self.peerAddresses, self.seeders,
-              self.leachers, len(self.peerAddresses))
+        # print(type(self.trackerPeers))
+        if isinstance(self.trackerPeers, list):
+            for peer in self.trackerPeers:
+                self.peerAddresses.append((peer[b'ip'], peer[b'port']))
+        else:  # binary model
+            allPeers = self._generate_peers()
+
+            for i in allPeers:
+                self.peerAddresses.append(self.extractIPAdressandPort(i))
+            print(self.peerAddresses, self.seeders,
+                  self.leachers, len(self.peerAddresses))
         # print(allPeers)
 
 

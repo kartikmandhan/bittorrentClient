@@ -88,7 +88,7 @@ class PeerWireProtocol:
         current = 0
         peerMessages = {}
         while(current != len(response)):
-            if(len(response) < 4):
+            if(len(response) - current < 4):
                 return {"error": "Invalid Response"}
             lenPrefix = struct.unpack("!i", response[current: current + 4])[0]
             if(lenPrefix == 0):
@@ -104,6 +104,7 @@ class PeerWireProtocol:
                 # unchoke
                 peerMessages["unchoke"] = True
                 current += payloadStartIndex
+                self.peer_choking = False
             if ID == 2:
                 # interested
                 peerMessages["interested"] = True
@@ -174,8 +175,12 @@ class Peer(PeerWireProtocol):
         self.isHandshakeDone = False
         # since makeConnectiona doHandshake Both require timeout
         self.connectionSocket.settimeout(10)
+        self.isConnectionAlive = False
 
     def decodeHandshakeResponse(self, response):
+        if(len(response) < 68):
+            print("ganda response", response)
+            return
         pstrlen = struct.unpack("!b", response[:1])
         pstrlen = int.from_bytes(pstrlen, 'big')
         pstr = struct.unpack("!19s", response[1: pstrlen + 1])[0]
@@ -192,9 +197,11 @@ class Peer(PeerWireProtocol):
 
         try:
             self.connectionSocket.connect((self.IP, self.port))
+            self.isConnectionAlive = True
             return True
         except:
             print("Unable Establish TCP Connection")
+            self.isConnectionAlive = False
             return False
 
     def doHandshake(self):
@@ -217,73 +224,44 @@ class Peer(PeerWireProtocol):
                     return True
                 else:
                     self.connectionSocket.close()
+                    self.isConnectionAlive = False
                     print("Received Incorrect Info Hash")
                     return False
             except Exception as errorMsg:
-                self.connectionSocket.close()
-                print("Error in doHandshake : ", errorMsg)
+                print("Error in doHandshake : ", errorMsg, handshakeResponse)
+                self.isConnectionAlive = False
                 return False
         return False
 
     def sendMsg(self, ID=None, optional=None):
-        if ID == None:
-            self.connectionSocket.send(self._generateKeepAliveMsg())
-        elif ID == 0:
-            self.connectionSocket.send(self._generateChokeMsg())
-        elif ID == 1:
-            self.connectionSocket.send(self._generateUnchokeMsg())
-        elif ID == 2:
-            self.connectionSocket.send(self._generateInterestedMsg())
-        elif ID == 3:
-            self.connectionSocket.send(self._generateNotInterestedMsg())
-        elif ID == 4:
-            self.connectionSocket.send(self._generateHaveMsg(optional))
-        elif ID == 5:
-            self.connectionSocket.send(self._generateBitFieldMsg())
-        elif ID == 6:
-            self.connectionSocket.send(self._generateRequestMsg(optional))
-        elif ID == 7:
-            self.connectionSocket.send(self._generatePieceMsg(optional))
-        elif ID == 8:
-            self.connectionSocket.send(self._generateCancelMsg())
-        elif ID == 9:
-            self.connectionSocket.send(self._generatePortMsg())
-
-    def scraped(self):
-        # i = 0
-        # while(i < 2):
-        response1 = self.connectionSocket.recv(4096)
-
-        # i += 1
-        print(response1)
-        # if len(response1) > 0:
-        #     lenPrefix = struct.unpack("!i", response1[:4])[0]
-        #     ID = struct.unpack("!b", response1[4:5])
-        #     ID = int.from_bytes(ID, "big")
-        #     print(lenPrefix, ID)
-
-        peerMessages = self.decodeMsg(response1)
-        print(peerMessages)
-
-        print("Number of pieces :", self.numberOfPieces)
-        # peer.send(handshakePacket)
-        # handshakeResponse = peer.recv()
-        self.connectionSocket.send(self._generateRequestMsg(0, 0, 2 ** 14))
-        block = b''
-        self.connectionSocket.settimeout(10)
-        while(1):
-            try:
-                block += self.connectionSocket.recv(16384)
-            except:
-                print("timeout")
-                break
-        self.connectionSocket.settimeout(None)
-        print("Block size :", len(block))
-        print("Piece Size : ", self.torreFileInfo.pieceLength)
-        # print(block)
-        peerMessages = self.decodeMsg(block)
-        print(peerMessages)
-        return True
+        try:
+            if ID == None:
+                self.connectionSocket.send(self._generateKeepAliveMsg())
+            elif ID == 0:
+                self.connectionSocket.send(self._generateChokeMsg())
+            elif ID == 1:
+                self.connectionSocket.send(self._generateUnchokeMsg())
+            elif ID == 2:
+                self.connectionSocket.send(self._generateInterestedMsg())
+            elif ID == 3:
+                self.connectionSocket.send(self._generateNotInterestedMsg())
+            elif ID == 4:
+                self.connectionSocket.send(self._generateHaveMsg(optional))
+            elif ID == 5:
+                self.connectionSocket.send(self._generateBitFieldMsg())
+            elif ID == 6:
+                self.connectionSocket.send(self._generateRequestMsg(optional))
+            elif ID == 7:
+                self.connectionSocket.send(self._generatePieceMsg(optional))
+            elif ID == 8:
+                self.connectionSocket.send(self._generateCancelMsg())
+            elif ID == 9:
+                self.connectionSocket.send(self._generatePortMsg())
+            return True
+        except:
+            self.isConnectionAlive = False
+            print("error in sendmsg")
+            return False
 
     def receiveMsg(self):
         response = b''
@@ -293,6 +271,7 @@ class Peer(PeerWireProtocol):
             except timeout:
                 break
             except Exception as errorMsg:
+                self.isConnectionAlive = False
                 print("Error in receiveMsg : ", errorMsg)
         return response
 
