@@ -1,6 +1,9 @@
+from enum import Flag
 import struct
 from socket import *
-
+import time
+import hashlib
+from math import ceil
 
 class PeerWireProtocol:
 
@@ -92,7 +95,7 @@ class PeerWireProtocol:
                 return {"error": "Invalid Response"}
             lenPrefix = struct.unpack("!i", response[current: current + 4])[0]
             if(lenPrefix == 0):
-                return
+                return peerMessages
             ID = struct.unpack("!b", response[current + 4: current + 5])
             ID = int.from_bytes(ID, "big")
 
@@ -162,20 +165,23 @@ class Peer(PeerWireProtocol):
         self.numberOfPieces = len(torrentFileInfo.hashOfPieces)
         self.peerAddresses = torrentFileInfo.peerAddresses
         # timepass nikal dege
-        self.torreFileInfo = torrentFileInfo
+        self.torrentFileInfo = torrentFileInfo
         self.IP = IP
         self.port = port
         # initial state is client not interested
-        self.am_choking = True
-        self.am_interested = False
-        self.peer_choking = True
-        self.peer_interested = False
-        self.bitfield = 0
+        self.state=peerState()
+        self.keepAliveTimeout = 10
+        # keep alive timer
+        self.keepAliveTimer = None
+        self.bitfield = set()
         self.connectionSocket = socket(AF_INET, SOCK_STREAM)
         self.isHandshakeDone = False
         # since makeConnectiona doHandshake Both require timeout
         self.connectionSocket.settimeout(10)
         self.isConnectionAlive = False
+        self.piece=b""
+        # to keep track if peer is currently being requested a piece
+        self.isDownloading=False
 
     def decodeHandshakeResponse(self, response):
         if(len(response) < 68):
@@ -194,7 +200,6 @@ class Peer(PeerWireProtocol):
         return (recvdinfoHash, pstrlen + 49)
 
     def makeConnection(self):
-
         try:
             self.connectionSocket.connect((self.IP, self.port))
             self.isConnectionAlive = True
@@ -283,3 +288,180 @@ class Peer(PeerWireProtocol):
                     # since we are evaluating each bit from right to left
                     pieceNumber = i*8+7-j
                     self.bitfield.add(pieceNumber)
+    def handleMessages(self, messages):
+        if 'choke' in messages:
+            self.state = DOWNSTATE0
+            print("\x1b]35mChoking ........")
+        if 'unchoke' in messages:
+            self.state = DOWNSTATE2
+        if 'keepAlive' in messages:
+            self.keepAliveTimer=time.time()
+        if 'interested' in messages:
+            pass
+        if 'notInterested' in messages:
+            pass
+        if 'bitfield' in messages:
+            self.extractBitField(messages['bitfield'])
+        if 'have' in messages:
+            # self.bitfield.add(messages['have'])
+            pass
+        if 'request' in messages:
+            pass
+        
+    def peerFSM( self,pieceNumber):
+        isPieceDownloaded = False
+        isFiniteMachineON = True
+        #DOWNSTATE are the objects of peerState Class
+        while isFiniteMachineON:
+            print(self.state)
+            # client state 0    : (client = not interested,  peer = choking)
+            if(self.state == DOWNSTATE0):
+                if(self.sendMsg(2)):
+                    self.state=DOWNSTATE1
+
+            # client state 1    : (client = interested,      peer = choking)
+            elif(self.state == DOWNSTATE1):
+                # recieve message 
+                response = self.receiveMsg()
+                messages = self.decodeMsg(response)
+                self.handleMessages(messages)
+                # self.state=DOWNSTATE2
+
+            # client state 2    : (client = interested,      peer = not choking)
+            elif(self.state == DOWNSTATE2):
+                # download the piece when in this state 
+                isPieceDownloaded = self.downloadPiece(pieceNumber)
+                isFiniteMachineON = False
+
+            #   think of sending uninterested messages in this state of FSM
+            elif(self.state==DOWNSTATE3):
+                isFiniteMachineON = False
+
+        return isPieceDownloaded
+        
+    def downloadPiece(self,pieceNumber):
+        print("Downloading Piece ..", pieceNumber, flush='true')
+        ###
+        BLOCK_SIZE = 2**14
+        numberOfBlocks = ceil(self.torrentFileInfo.pieceLength/(BLOCK_SIZE))
+        currentPieceLength = self.torrentFileInfo.pieceLength
+        if pieceNumber == self.torrentFileInfo.numberOfPieces-1:
+            currentPieceLength = (self.torrentFileInfo.lengthOfFileToBeDownloaded -
+                                (pieceNumber * self.torrentFileInfo.pieceLength))
+            numberOfBlocks = ceil(currentPieceLength/BLOCK_SIZE)
+            print("last piecelength", currentPieceLength, numberOfBlocks)
+        ###
+        piece = b''
+        offset = 0
+        blockNumber = 0
+        currentBlockLength = 0
+        while blockNumber < numberOfBlocks:
+            if currentPieceLength-offset >= BLOCK_SIZE:
+                currentBlockLength = BLOCK_SIZE
+            else:
+                currentBlockLength = currentPieceLength - offset
+            print(currentBlockLength, currentPieceLength)
+            block = self.downloadBlock(pieceNumber, offset, currentBlockLength)
+            if len(block) == 0:
+                print("Unable to Download block")
+                return (False, b'')
+            piece += block
+            offset += len(block)
+            print("Donwloaded Block ...", blockNumber, pieceNumber)
+            blockNumber += 1
+
+        pieceHash = hashlib.sha1(piece).digest()
+        print(pieceHash, self.torrentFileInfo.hashOfPieces[pieceNumber])
+        if pieceHash == self.torrentFileInfo.hashOfPieces[pieceNumber]:
+            print("pieceHash matched,writing in file", self.torrentFileInfo.nameOfFile)
+            # writePieceInFile(pieceNumber, piece)
+            return (True, piece)
+        return (False, b'')
+
+
+    def downloadBlock(self, pieceNumber, offset, blockLength):
+        if self.isHandshakeDone == False:
+            print("hndshake not done .....")
+            return b''
+        if self.peer_choking == True:
+            print("choking  .....")
+            return b''
+        retries = 0
+        while(retries < 3):
+            if self.isConnectionAlive == False:
+                print("Connection Not Alive ..")
+                break
+            if(self.sendMsg(6, (pieceNumber, offset, blockLength))):
+                # peer.connectionSocket.settimeout(None)
+                response = self.decodeMsg(self.receiveMsg())
+                if response and 'piece' in response:
+                    # print("response of piece : ", response, flush='true')
+                    return response['piece'][2]
+            retries += 1
+            print("Retrying ......")
+        return b''
+
+    # def isAbleToDownload(self):
+    #     if self.isConnectionAlive == False or self.isHandshakeDone == False:
+    #         return False
+    #     return True
+
+class peerState():
+    def __init__(self):
+        self.am_choking = True   
+        self.am_interested = False
+        self.peer_choking = True   
+        self.peer_interested = False           
+    
+    def makeDeadState(self):
+        self.am_choking = None  
+        self.am_interested = None
+        self.peer_choking = None  
+        self.peer_interested = None           
+
+    def __eq__(self, other): 
+        if self.am_choking != other.am_choking :
+            return False
+        if self.am_interested != other.am_interested:
+            return False
+        if self.peer_choking != other.peer_choking: 
+            return False
+        if self.peer_interested != other.peer_interested:
+            return False
+        return True
+    
+    def  __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __str__(self):
+        peer_state_log  = '[ client choking : '     + str(self.am_choking)
+        peer_state_log += ', client interested : '  + str(self.am_interested) 
+        peer_state_log += ', peer choking : '       + str(self.peer_choking)
+        peer_state_log += ', peer interested : '    + str(self.peer_interested) + ']'
+        return peer_state_log
+
+DOWNSTATE0 = peerState()
+
+DOWNSTATE1 = peerState()
+DOWNSTATE1.am_interested   = True
+    
+DOWNSTATE2 = peerState()
+DOWNSTATE2.am_interested   = True
+DOWNSTATE2.peer_choking    = False
+
+DOWNSTATE3 = peerState()
+DOWNSTATE3.makeDeadState()
+
+UPSTATE0 = peerState()
+
+UPSTATE1 = peerState()
+UPSTATE1.peer_interested = True
+   
+UPSTATE2 = peerState()
+UPSTATE2.peer_interested = True
+UPSTATE2.am_choking = False
+
+UPSTATE3 = peerState()
+UPSTATE3.makeDeadState()
+
+

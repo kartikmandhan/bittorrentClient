@@ -3,8 +3,9 @@ import sys
 from torrentFile import *
 from peerWireProtocol import *
 from math import ceil
-from threading import Thread
+from threading import Thread, get_native_id
 import hashlib
+from downloadAndSeed import *
 try:
 
     fileName = sys.argv[1]
@@ -37,6 +38,8 @@ def tryAllTrackerURLs(udpRequestMaker, httpRequestMaker):
             break
     return (didWeRecieveAddresses, didUDPAnswer)
 
+# this returns empty list once all pieces are requested
+
 
 def rarestPieceFirstSelection(allBitfields):
     rarestPieces = []
@@ -54,7 +57,7 @@ def writePieceInFile(pieceNumber, piece):
     f.write(piece)
 
 
-f = open(torrentFileData.nameOfFile, "wb")
+# f = open(torrentFileData.nameOfFile, "wb")
 
 
 def writeNullToFile():
@@ -103,7 +106,7 @@ def downloadPiece(pieceNumber):
 
 
 def downloadBlock(pieceNumber, offset, blockLength):
-    for peerNumber in allBitfields[pieceNumber]:
+    for peerNumber in requestedPieces[pieceNumber]:
         peer = workingPeers[peerNumber]
         if peer.isHandshakeDone == False:
             print("hndshake not done .....")
@@ -145,19 +148,19 @@ def tryToUnchokePeer(peer):
 
 
 def getBitfield(peer, peerNumber):
-    print("I am in getBitfield", flush="true")
+    print("I am in getBitfield", get_native_id(), flush="true")
+
     if(peer.doHandshake()):
         print("HandShake Successful .. ")
         response = peer.decodeMsg(peer.receiveMsg())
+        peer.handleMessages(response)
         # function call for bitfield
-        if 'bitfield' in response:
-            peer.extractBitField(response['bitfield'])
-            for pieceNumber in peer.bitfield:
-                if pieceNumber in allBitfields:
-                    allBitfields[pieceNumber].append(peerNumber)
-                else:
-                    allBitfields[pieceNumber] = [peerNumber]
-        tryToUnchokePeer(peer)
+        for pieceNumber in peer.bitfield:
+            if pieceNumber in allBitfields:
+                allBitfields[pieceNumber].append(peerNumber)
+            else:
+                allBitfields[pieceNumber] = [peerNumber] 
+        # tryToUnchokePeer(peer)
     print("at end of getbitfield")
 
 
@@ -165,11 +168,14 @@ workingPeers = []
 downloadedPiecesBitfields = set()
 
 
-def isDownloadRemaining():
-    if torrentFileData.numberOfPieces != len(downloadedPiecesBitfields):
-        return True
-    return False
 
+
+# def download(pieceNumber):
+#     requestedPieces[pieceNumber] = allBitfields.pop(pieceNumber)
+#     if(downloadPiece(pieceNumber)):
+#         downloadedPiecesBitfields.add(pieceNumber)
+#     else:
+#         allBitfields[pieceNumber] = requestedPieces.pop(pieceNumber)
 
 def makeRequest():
     udpRequestMaker = udpTracker(fileName)
@@ -208,27 +214,9 @@ def makeRequest():
 
         for peer in peerAddresses:
             workingPeers.append(Peer(peer[0], peer[1], mainRequestMaker))
-        # {
-        #     0: [peerNo],
-        #     1: [peerNo,peerNo,peerNo,peerNo],
-        # }
-        # len of each value will give the count of peers having a piece
-
-        for peerNumber, peer in enumerate(workingPeers):
-            if peerNumber > 10:
-                break
-            thread = Thread(
-                target=getBitfield, args=(peer, peerNumber))
-            thread.start()
-        writeNullToFile()
-        while isDownloadRemaining():
-            rarestPieces = rarestPieceFirstSelection(allBitfields)
-            print(rarestPieces)
-            for pieceNumber in rarestPieces:
-                if(downloadPiece(pieceNumber)):
-                    allBitfields.pop(pieceNumber)
-                    downloadedPiecesBitfields.add(pieceNumber)
-
+        
+        downloader = downloadAndSeed(workingPeers, torrentFileData)
+        downloader.download()
     else:
         print("All trackers are useless")
 
