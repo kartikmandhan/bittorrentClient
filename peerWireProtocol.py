@@ -1,4 +1,3 @@
-from enum import Flag
 import struct
 from socket import *
 import time
@@ -87,6 +86,8 @@ class PeerWireProtocol:
 
     def decodeMsg(self, response):
         # len(lenPrefix)+ 1 byte of Id==5
+        if response == None:
+            return {}
         payloadStartIndex = 5
         current = 0
         peerMessages = {}
@@ -95,13 +96,15 @@ class PeerWireProtocol:
                 return {"error": "Invalid Response"}
             lenPrefix = struct.unpack("!i", response[current: current + 4])[0]
             if(lenPrefix == 0):
-                return peerMessages
+                peerMessages["keepAlive"] = True
+                current += payloadStartIndex - 1
+                continue
             ID = struct.unpack("!b", response[current + 4: current + 5])
             ID = int.from_bytes(ID, "big")
 
             if ID == 0:
                 # choke
-                peerMessages["keepAlive"] = True
+                peerMessages["choke"] = True
                 current += payloadStartIndex
             if ID == 1:
                 # unchoke
@@ -177,16 +180,15 @@ class Peer(PeerWireProtocol):
         self.connectionSocket = socket(AF_INET, SOCK_STREAM)
         self.isHandshakeDone = False
         # since makeConnectiona doHandshake Both require timeout
-        self.connectionSocket.settimeout(10)
+        self.connectionSocket.settimeout(4)
         self.isConnectionAlive = False
-        self.piece=b""
         # to keep track if peer is currently being requested a piece
         self.isDownloading=False
 
     def decodeHandshakeResponse(self, response):
         if(len(response) < 68):
-            print("ganda response", response)
-            return
+            print("Bad response in handshake", response)
+            return (b'', len(response))
         pstrlen = struct.unpack("!b", response[:1])
         pstrlen = int.from_bytes(pstrlen, 'big')
         pstr = struct.unpack("!19s", response[1: pstrlen + 1])[0]
@@ -206,16 +208,19 @@ class Peer(PeerWireProtocol):
             return True
         except:
             print("Unable Establish TCP Connection")
-            self.isConnectionAlive = False
+            # self.isConnectionAlive = False
+            self.disconnectPeer()
             return False
 
     def doHandshake(self):
+        self.connectionSocket.settimeout(10)
         if(self.makeConnection() and not self.isHandshakeDone):
             handshakePacket = self.makeHandshakePacket(
                 self.infoHash, self.myPeerID)
-            self.connectionSocket.send(handshakePacket)
-            handshakeResponse = b""
             try:
+                self.connectionSocket.send(handshakePacket)
+                handshakeResponse = b""
+            
                 HANDSHAKE_PACKET_LENGTH = 68
                 handshakeResponse = self.connectionSocket.recv(
                     HANDSHAKE_PACKET_LENGTH)
@@ -226,15 +231,19 @@ class Peer(PeerWireProtocol):
                 if(recvdinfoHash == self.infoHash):
                     self.isHandshakeDone = True
                     print("Info Hash matched")
+                    self.connectionSocket.settimeout(4)
                     return True
                 else:
-                    self.connectionSocket.close()
-                    self.isConnectionAlive = False
+                    # self.connectionSocket.close()
+
+                    # self.isConnectionAlive = False
+                    self.disconnectPeer()
                     print("Received Incorrect Info Hash")
                     return False
             except Exception as errorMsg:
                 print("Error in doHandshake : ", errorMsg, handshakeResponse)
-                self.isConnectionAlive = False
+                # self.isConnectionAlive = False
+                self.disconnectPeer()
                 return False
         return False
 
@@ -264,21 +273,68 @@ class Peer(PeerWireProtocol):
                 self.connectionSocket.send(self._generatePortMsg())
             return True
         except:
-            self.isConnectionAlive = False
-            print("error in sendmsg")
+            # self.isConnectionAlive = False
+            self.disconnectPeer()
+            print("error in sendmsg", ID)
             return False
 
+    # def receiveMsg(self):
+    #     response = b''
+    #     self.connectionSocket.settimeout(2)
+    #     timeoutCount = 0
+    #     while(1):
+    #         try:
+    #             r= self.connectionSocket.recv(4096)
+    #             response += r
+    #             # print("Receive msg", r)
+    #             if len(r) == 0:
+    #                 # self.isHandshakeDone = False
+    #                 # self.isConnectionAlive = False
+    #                 # self.connectionSocket.close()
+    #                 self.disconnectPeer()
+    #                 break
+    #         except timeout:
+    #             # print("Timeout in receiceMsg")
+    #             timeoutCount += 1
+    #             if timeoutCount >= 3:
+    #                 break
+    #         except Exception as errorMsg:
+    #             # self.isConnectionAlive = False
+    #             # self.isHandshakeDone = False
+    #             self.disconnectPeer()
+    #             print("Error in receiveMsg : ", errorMsg)
+    #             break
+    #     return response
+
     def receiveMsg(self):
-        response = b''
-        while(1):
-            try:
-                response += self.connectionSocket.recv(4096)
-            except timeout:
-                break
-            except Exception as errorMsg:
-                self.isConnectionAlive = False
-                print("Error in receiveMsg : ", errorMsg)
-        return response
+        # LengthPrefix
+        if self.isConnectionAlive == False:
+            return None
+        lengthPrefixSize = 4
+        try :
+            response = self.connectionSocket.recv(lengthPrefixSize)
+            if len(response) < lengthPrefixSize:
+                return None
+            lenPrefix = struct.unpack("!i", response)[0]
+            if lenPrefix == 0:
+                # keepAlive message
+                return response
+            completeResponse = response
+            while lenPrefix > 0:
+                r = self.connectionSocket.recv(lenPrefix)
+                if len(r) == 0:
+                    return None
+                completeResponse += r
+                lenPrefix -= len(r)        
+        except timeout:
+            print("Unable To receive")
+            return None
+        except Exception as errorMsg:
+            self.disconnectPeer()
+            print("Error in receiveMsg : ", errorMsg)
+            return None
+        return completeResponse
+
 
     def extractBitField(self, bitfieldString):
         self.bitfield = set()
@@ -309,20 +365,31 @@ class Peer(PeerWireProtocol):
             pass
         
     def peerFSM( self,pieceNumber):
-        isPieceDownloaded = False
+        isPieceDownloaded = (False, b'')
         isFiniteMachineON = True
         #DOWNSTATE are the objects of peerState Class
+        count = 0
         while isFiniteMachineON:
-            print(self.state)
+            # print(self.state)
             # client state 0    : (client = not interested,  peer = choking)
             if(self.state == DOWNSTATE0):
                 if(self.sendMsg(2)):
+                    # print("Changing state..")
                     self.state=DOWNSTATE1
+                else:
+                    count += 1
+                    if count > 3:
+                        break
 
             # client state 1    : (client = interested,      peer = choking)
             elif(self.state == DOWNSTATE1):
                 # recieve message 
+                # print("Response : 1")
                 response = self.receiveMsg()
+                # print("Response : 2")
+                if response == None:
+                    self.state = DOWNSTATE0
+                    break
                 messages = self.decodeMsg(response)
                 self.handleMessages(messages)
                 # self.state=DOWNSTATE2
@@ -360,25 +427,30 @@ class Peer(PeerWireProtocol):
                 currentBlockLength = BLOCK_SIZE
             else:
                 currentBlockLength = currentPieceLength - offset
-            print(currentBlockLength, currentPieceLength)
+            # print(currentBlockLength, currentPieceLength)
             block = self.downloadBlock(pieceNumber, offset, currentBlockLength)
             if len(block) == 0:
                 print("Unable to Download block")
                 return (False, b'')
             piece += block
             offset += len(block)
-            print("Donwloaded Block ...", blockNumber, pieceNumber)
+            # print("Donwloaded Block ...", blockNumber, pieceNumber)
             blockNumber += 1
 
         pieceHash = hashlib.sha1(piece).digest()
-        print(pieceHash, self.torrentFileInfo.hashOfPieces[pieceNumber])
+        # print(pieceHash, self.torrentFileInfo.hashOfPieces[pieceNumber])
         if pieceHash == self.torrentFileInfo.hashOfPieces[pieceNumber]:
-            print("pieceHash matched,writing in file", self.torrentFileInfo.nameOfFile)
+            print("pieceHash matched,writing in file , Downloaded Piece ..", pieceNumber)
             # writePieceInFile(pieceNumber, piece)
             return (True, piece)
         return (False, b'')
 
-
+    def disconnectPeer(self):
+        self.isHandshakeDone = False
+        self.isConnectionAlive = False
+        self.bitfield = set()
+        self.isDownloading = False
+        # self.connectionSocket.close()
     def downloadBlock(self, pieceNumber, offset, blockLength):
         if self.isHandshakeDone == False:
             print("hndshake not done .....")

@@ -132,8 +132,8 @@ class httpTracker(FileInfo):
 
             for i in allPeers:
                 self.peerAddresses.append(self.extractIPAdressandPort(i))
-            print(self.peerAddresses, self.seeders,
-                  self.leachers, len(self.peerAddresses))
+            # print(self.peerAddresses, self.seeders,
+            #       self.leachers, len(self.peerAddresses))
         # print(allPeers)
 
 
