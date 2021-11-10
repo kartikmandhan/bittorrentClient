@@ -17,6 +17,7 @@ torrentFileData = FileInfo(sys.argv[1])
 torrentFileData.extractFileMetaData()
 # print(torrentFileData)
 # print(torrentFileData.infoDictionary[b"files"])
+print("Paths :", torrentFileData.filesInfo)
 
 
 def tryAllTrackerURLs(udpRequestMaker, httpRequestMaker):
@@ -78,7 +79,7 @@ def makeRequest():
         workingPeers = []
         for peer in peerAddresses:
             workingPeers.append(Peer(peer[0], peer[1], mainRequestMaker))
-        
+
         downloader = downloadAndSeed(workingPeers, torrentFileData)
         downloader.download()
     else:

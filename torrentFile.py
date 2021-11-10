@@ -68,7 +68,8 @@ class FileInfo:
     def extractFileMetaData(self):
         fp = open(self.fileName, "rb")
         fileContent = bencodepy.decode(fp.read())
-        self.announceURL = fileContent[b"announce"].decode()
+        if b"announce" in fileContent:
+            self.announceURL = fileContent[b"announce"].decode()
         self.infoDictionary = fileContent[b"info"]
         self.nameOfFile = self.infoDictionary[b"name"].decode()
         self.pieces = self.infoDictionary[b"pieces"]
@@ -86,6 +87,10 @@ class FileInfo:
                 fileDict = {}
                 fileDict["length"] = file[b"length"]
                 fileDict["path"] = file[b"path"]
+                path = ""
+                for i in fileDict["path"]:
+                    path += i.decode() + "/"
+                fileDict["path"] = path[:-1]
                 self.filesInfo.append(fileDict)
                 self.lengthOfFileToBeDownloaded += file[b"length"]
         else:
@@ -242,5 +247,3 @@ class udpTracker(FileInfo):
         announcePacket += struct.pack("!i", -1)
         announcePacket += struct.pack("!H", self.portNo)
         return announcePacket
-
-
