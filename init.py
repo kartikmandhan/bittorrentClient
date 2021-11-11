@@ -32,11 +32,11 @@ def tryAllTrackerURLs(udpRequestMaker, httpRequestMaker):
                 break
         else:
             httpRequestMaker.announceURL = url
-            httpRequestMaker.httpTrackerRequest()
-            didWeRecieveAddresses = True
-            # http answered
-            didUDPAnswer = 2
-            break
+            if(httpRequestMaker.httpTrackerRequest()):
+                didWeRecieveAddresses = True
+                # http answered
+                didUDPAnswer = 2
+                break
     return (didWeRecieveAddresses, didUDPAnswer)
 
 # this returns empty list once all pieces are requested
@@ -60,10 +60,10 @@ def makeRequest():
                 didWeRecieveAddresses = True
                 didUDPAnswer = 1
         else:
-            httpRequestMaker.httpTrackerRequest()
-            didWeRecieveAddresses = True
-            # http answered
-            didUDPAnswer = 2
+            if(httpRequestMaker.httpTrackerRequest()):
+                didWeRecieveAddresses = True
+                # http answered
+                didUDPAnswer = 2
 
     if(didWeRecieveAddresses):
         if didUDPAnswer == 1:
@@ -76,6 +76,7 @@ def makeRequest():
         peerAddresses = mainRequestMaker.peerAddresses
 
         print("Piece Length : ", torrentFileData.pieceLength)
+        print("Peer addresses :" , mainRequestMaker.peerAddresses)
         workingPeers = []
         for peer in peerAddresses:
             workingPeers.append(Peer(peer[0], peer[1], mainRequestMaker))

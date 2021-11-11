@@ -206,21 +206,23 @@ class Peer(PeerWireProtocol):
             self.connectionSocket.connect((self.IP, self.port))
             self.isConnectionAlive = True
             return True
-        except:
-            print("Unable Establish TCP Connection")
+        except Exception as errorMsg:
+            print("Unable Establish TCP Connection", errorMsg)
             # self.isConnectionAlive = False
             self.disconnectPeer()
             return False
 
     def doHandshake(self):
-        self.connectionSocket.settimeout(10)
-        if(self.makeConnection() and not self.isHandshakeDone):
+        self.connectionSocket.settimeout(25)
+        if not self.isConnectionAlive:
+            self.makeConnection()
+
+        handshakeResponse = b""
+        if(not self.isHandshakeDone and self.isConnectionAlive):
             handshakePacket = self.makeHandshakePacket(
                 self.infoHash, self.myPeerID)
             try:
                 self.connectionSocket.send(handshakePacket)
-                handshakeResponse = b""
-            
                 HANDSHAKE_PACKET_LENGTH = 68
                 handshakeResponse = self.connectionSocket.recv(
                     HANDSHAKE_PACKET_LENGTH)
@@ -237,7 +239,8 @@ class Peer(PeerWireProtocol):
                     # self.connectionSocket.close()
 
                     # self.isConnectionAlive = False
-                    self.disconnectPeer()
+                    self.isHandshakeDone = False
+                    # self.disconnectPeer()
                     print("Received Incorrect Info Hash")
                     return False
             except Exception as errorMsg:
@@ -333,6 +336,7 @@ class Peer(PeerWireProtocol):
             self.disconnectPeer()
             print("Error in receiveMsg : ", errorMsg)
             return None
+        print(completeResponse)
         return completeResponse
 
 
@@ -427,18 +431,18 @@ class Peer(PeerWireProtocol):
                 currentBlockLength = BLOCK_SIZE
             else:
                 currentBlockLength = currentPieceLength - offset
-            # print(currentBlockLength, currentPieceLength)
+            print(currentBlockLength, currentPieceLength, numberOfBlocks, blockNumber, pieceNumber)
             block = self.downloadBlock(pieceNumber, offset, currentBlockLength)
             if len(block) == 0:
-                print("Unable to Download block")
+                print("Unable to Download block", blockNumber, pieceNumber)
                 return (False, b'')
             piece += block
             offset += len(block)
-            # print("Donwloaded Block ...", blockNumber, pieceNumber)
+            print("Donwloaded Block ...", blockNumber, pieceNumber)
             blockNumber += 1
 
         pieceHash = hashlib.sha1(piece).digest()
-        # print(pieceHash, self.torrentFileInfo.hashOfPieces[pieceNumber])
+        print(pieceHash, self.torrentFileInfo.hashOfPieces[pieceNumber])
         if pieceHash == self.torrentFileInfo.hashOfPieces[pieceNumber]:
             print("pieceHash matched,writing in file , Downloaded Piece ..", pieceNumber)
             # writePieceInFile(pieceNumber, piece)
@@ -537,3 +541,11 @@ UPSTATE3 = peerState()
 UPSTATE3.makeDeadState()
 
 
+# b'\x00\x00\x00b\x14\x00d1:md11:ut_metadatai2ee13:metadata_sizei1789e4:reqqi255e11:upload_onlyi1e1:v16:Halite v 0.4.0.3e'
+# b'\x00\x00\x00]\x14\x00d1:md11:ut_metadatai2ee13:metadata_sizei1789e4:reqqi255e11:upload_onlyi1e1:v11:Tixati 2.18e'
+# b'\x00\x00\x00b\x14\x00d1:md11:ut_metadatai2ee13:metadata_sizei1789e4:reqqi255e11:upload_onlyi1e1:v16:Halite v 0.3.4.0e'
+# b'\x00\x00\x00]\x14\x00d1:md11:ut_metadatai2ee13:metadata_sizei1789e4:reqqi255e11:upload_onlyi1e1:v11:Tixati 2.12e'
+# HandShake Successful .. 
+# b'\x00\x00\x00]\x14\x00d1:md11:ut_metadatai2ee13:metadata_sizei1789e4:reqqi255e11:upload_onlyi1e1:v11:Tixati 2.15e'
+# b'\x00\x00\x00b\x14\x00d1:md11:ut_metadatai2ee13:metadata_sizei1789e4:reqqi255e11:upload_onlyi1e1:v16:Halite v 0.4.0.2e'
+# b'\x00\x00\x00d\x14\x00d1:md11:ut_metadatai2ee13:metadata_sizei1789e4:reqqi255e11:upload_onlyi1e1:v18:qBittorrent v3.3.1e'

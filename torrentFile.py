@@ -36,6 +36,7 @@ class FileInfo:
         self.announceList = []
         self.peerAddresses = []
         self.numberOfPieces = 0
+        # self.encoding = ""
 
     def extractIPAdressandPort(self, ipAndPortString):
         port = int.from_bytes(ipAndPortString[-2:], "big")
@@ -68,8 +69,12 @@ class FileInfo:
     def extractFileMetaData(self):
         fp = open(self.fileName, "rb")
         fileContent = bencodepy.decode(fp.read())
+        print(fileContent)
         if b"announce" in fileContent:
             self.announceURL = fileContent[b"announce"].decode()
+        # if b"encoding" in fileContent:
+        #     self.encoding = fileContent[b"encoding"].decode()
+        
         self.infoDictionary = fileContent[b"info"]
         self.nameOfFile = self.infoDictionary[b"name"].decode()
         self.pieces = self.infoDictionary[b"pieces"]
@@ -112,12 +117,16 @@ class httpTracker(FileInfo):
                   "downloaded": self.downloaded, "left": self.lengthOfFileToBeDownloaded, "compact": 1}
         # print(urllib.parse.urlencode(params))
         try:
-            announceResponse = requests.get(self.announceURL, params).content
+            announceResponse = requests.get(self.announceURL, params, timeout = 10).content
         except:
             print("Error : request module")
-            return
-        trackerResponseDict = bencodepy.decode(announceResponse)
-        print(trackerResponseDict)
+            return False
+        try:
+            trackerResponseDict = bencodepy.decode(announceResponse)
+            print(trackerResponseDict)
+        except:
+            print("Unable to decode tracker response")
+            return False
 
         # if 'complete' in tracekerResponseDict:
         if b'complete' in trackerResponseDict:
@@ -140,6 +149,7 @@ class httpTracker(FileInfo):
             # print(self.peerAddresses, self.seeders,
             #       self.leachers, len(self.peerAddresses))
         # print(allPeers)
+        return True
 
 
 class udpTracker(FileInfo):

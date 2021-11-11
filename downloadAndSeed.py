@@ -1,6 +1,8 @@
 from threading import Thread, get_native_id, Lock
 import time
 import os
+import random
+import sys
 
 
 class downloadAndSeed():
@@ -21,20 +23,22 @@ class downloadAndSeed():
             if(peer.doHandshake()):
                 print("HandShake Successful .. ")
                 response = peer.decodeMsg(peer.receiveMsg())
+                print("Response in bitfield :",response)
                 peer.handleMessages(response)
                 # function call for bitfield
+                self.downloadLock.acquire()
                 for pieceNumber in peer.bitfield:
                     if pieceNumber in self.allBitfields:
                         self.allBitfields[pieceNumber].append(peerNumber)
                     else:
                         self.allBitfields[pieceNumber] = [peerNumber]
+                self.downloadLock.release()
                 # tryToUnchokePeer(peer)
                 break
             else:
                 retry += 1
                 if retry > 3:
                     break
-                continue
 
     def isDownloadRemaining(self):
         if self.torrentFileInfo.numberOfPieces != len(self.downloadedPiecesBitfields):
@@ -44,11 +48,15 @@ class downloadAndSeed():
     def rarestPieceFirstSelection(self):
         rarestPieces = []
         if len(self.allBitfields) == 0:
+            # print("In fun 0", rarestPieces)
             return rarestPieces
-        rarestCount = min(map(len, self.allBitfields.values()))
+        # rarestCount = min(map(len, self.allBitfields.values()))
+        rarestCount = min(map(lambda pieceNumber : len(self.allBitfields[pieceNumber]) if pieceNumber not in self.downloadedPiecesBitfields else sys.maxsize, self.allBitfields.keys()))
+        print("rarestCount", rarestCount)
         for pieceNumber in self.allBitfields.keys():
             if len(self.allBitfields[pieceNumber]) == rarestCount and pieceNumber not in self.downloadedPiecesBitfields:
                 rarestPieces.append(pieceNumber)
+        # print("In fun", rarestPieces)
         return rarestPieces
 
     def download(self):
@@ -66,7 +74,7 @@ class downloadAndSeed():
             allDonwloadingThreads = []
             if len(self.downloadedPiecesBitfields) > 0:
                 print("Donwloaded Number of Pieces .....",
-                      len(self.downloadedPiecesBitfields))
+                      len(self.downloadedPiecesBitfields), len(rarestPieces))
             for pieceNumber in rarestPieces:
                 peer = self.peerSelection(pieceNumber)
                 if peer == None:
@@ -77,17 +85,21 @@ class downloadAndSeed():
                                 args=(peer, pieceNumber))
                 allDonwloadingThreads.append(thread)
                 thread.start()
+            count = 0
             for thread in allDonwloadingThreads:
                 thread.join()
+                count+=1
+                print("Need to join" + str(len(allDonwloadingThreads)) + "Joined :" + str(count))
+            
         print("Downloaded File", self.torrentFileInfo.nameOfFile)
 
     def downloadPiece(self, peer, pieceNumber):
         peer.isDownloading = True
         startTime = time.time()
         isPieceDownloaded, piece = peer.peerFSM(pieceNumber)
+        peer.isDownloading = False
         endTime = time.time()
         if isPieceDownloaded == False:
-            peer.isDownloading = False
             return
         print("time taken in downloading a piece", endTime-startTime)
         self.downloadLock.acquire()
@@ -96,15 +108,18 @@ class downloadAndSeed():
         self.downloadedPiecesBitfields.add(pieceNumber)
         self.fileHandler.writePiece(pieceNumber, piece)
         self.downloadLock.release()
-        peer.isDownloading = False
+        # peer.isDownloading = False
         # print("I am Out of Download Piece",get_native_id())
 
     def peerSelection(self, pieceNumber):
+        random.shuffle(self.allBitfields[pieceNumber])
         for peerNumber in self.allBitfields[pieceNumber]:
             peer = self.allPeers[peerNumber]
             if peer.isDownloading or not peer.isConnectionAlive or not peer.isHandshakeDone:
                 print("peerNumber", peerNumber, peer.isDownloading,
                       peer.isConnectionAlive, peer.isHandshakeDone)
+                if not peer.isConnectionAlive or not peer.isHandshakeDone:
+                    Thread(target=self.getBitfield, args=(peer, peerNumber)).start()
                 continue
             else:
                 return peer
@@ -122,8 +137,9 @@ class fileOperations():
             self.parentDir += torrentFileInfo.nameOfFile
 
     def writeNullToFile(self, fp, size):
-        data = b"\x00" * size
-        fp.write(data)
+        # data = b"\x00" * size
+        # fp.write(data)
+        pass
 
     def writePieceInFile(self, pieceNumber, piece, filePath):
         with open(os.path.join(self.parentDir, filePath), 'ab') as fp:
@@ -167,17 +183,18 @@ class fileOperations():
                 if offset < allFiles[i]["length"]:
                     if len(piece) <= allFiles[i]["length"] - offset:
                         fp = open(os.path.join(self.parentDir,
-                                  allFiles[i]['path']), 'ab')
+                                  allFiles[i]['path']), 'rb+')
                         fp.seek(offset, 0)
                         fp.write(piece)
                         fp.close()
+                        return
                     else:
                         # condition when piece size is greater than filesizes
                         while(len(piece) != 0):
                             pieceToWrite = piece[:(
                                 allFiles[i]["length"] - offset)]
                             fp = open(os.path.join(self.parentDir,
-                                                   allFiles[i]['path']), 'ab')
+                                                   allFiles[i]['path']), 'rb+')
                             fp.seek(offset, 0)
                             fp.write(pieceToWrite)
                             fp.close()
@@ -188,4 +205,3 @@ class fileOperations():
                 else:
                     offset -= allFiles[i]["length"]
                     i += 1
-                    continue
