@@ -3,6 +3,7 @@ import time
 import os
 import random
 import sys
+from socket import *
 
 
 class downloadAndSeed():
@@ -23,7 +24,7 @@ class downloadAndSeed():
             if(peer.doHandshake()):
                 print("HandShake Successful .. ")
                 response = peer.decodeMsg(peer.receiveMsg())
-                print("Response in bitfield :",response)
+                print("Response in bitfield :", response)
                 peer.handleMessages(response)
                 # function call for bitfield
                 self.downloadLock.acquire()
@@ -51,7 +52,8 @@ class downloadAndSeed():
             # print("In fun 0", rarestPieces)
             return rarestPieces
         # rarestCount = min(map(len, self.allBitfields.values()))
-        rarestCount = min(map(lambda pieceNumber : len(self.allBitfields[pieceNumber]) if pieceNumber not in self.downloadedPiecesBitfields else sys.maxsize, self.allBitfields.keys()))
+        rarestCount = min(map(lambda pieceNumber: len(
+            self.allBitfields[pieceNumber]) if pieceNumber not in self.downloadedPiecesBitfields else sys.maxsize, self.allBitfields.keys()))
         print("rarestCount", rarestCount)
         for pieceNumber in self.allBitfields.keys():
             if len(self.allBitfields[pieceNumber]) == rarestCount and pieceNumber not in self.downloadedPiecesBitfields:
@@ -88,9 +90,10 @@ class downloadAndSeed():
             count = 0
             for thread in allDonwloadingThreads:
                 thread.join()
-                count+=1
-                print("Need to join" + str(len(allDonwloadingThreads)) + "Joined :" + str(count))
-            
+                count += 1
+                print("Need to join" + str(len(allDonwloadingThreads)) +
+                      "Joined :" + str(count))
+
         print("Downloaded File", self.torrentFileInfo.nameOfFile)
 
     def downloadPiece(self, peer, pieceNumber):
@@ -111,6 +114,21 @@ class downloadAndSeed():
         # peer.isDownloading = False
         # print("I am Out of Download Piece",get_native_id())
 
+    def seeding(self):
+        self.clientPeer = Peer('', 6885, self.torrentFileInfo)
+        self.clientPeer.startSeeding()
+        while True:
+            connectionRecieved = self.clientPeer.acceptConnection()
+            print("connection recvd", connectionRecieved)
+            # if connectionRecieved != None:
+            #     peerSocket, peerAddress = connectionRecieved
+            #     peerIP, peerPort = peerAddress
+            #     peerInstance = Peer(
+            #         peerIP, peerPort, self.torrentFileInfo, peerSocket)
+            #     Thread(target=peerInstance.uploadInitiator).start()
+            # else:
+            #     time.sleep(3)
+
     def peerSelection(self, pieceNumber):
         random.shuffle(self.allBitfields[pieceNumber])
         for peerNumber in self.allBitfields[pieceNumber]:
@@ -119,7 +137,8 @@ class downloadAndSeed():
                 print("peerNumber", peerNumber, peer.isDownloading,
                       peer.isConnectionAlive, peer.isHandshakeDone)
                 if not peer.isConnectionAlive or not peer.isHandshakeDone:
-                    Thread(target=self.getBitfield, args=(peer, peerNumber)).start()
+                    Thread(target=self.getBitfield,
+                           args=(peer, peerNumber)).start()
                 continue
             else:
                 return peer
@@ -142,7 +161,7 @@ class fileOperations():
         pass
 
     def writePieceInFile(self, pieceNumber, piece, filePath):
-        with open(os.path.join(self.parentDir, filePath), 'ab') as fp:
+        with open(os.path.join(self.parentDir, filePath), 'rb+') as fp:
             fp.seek(pieceNumber*self.torrentFileInfo.pieceLength, 0)
             fp.write(piece)
 
@@ -205,3 +224,60 @@ class fileOperations():
                 else:
                     offset -= allFiles[i]["length"]
                     i += 1
+
+    def readBlock(self, pieceNumber, offset, length):
+        block = b''
+        if not self.isMultiFile:
+            try:
+                fp = open(os.path.join(self.parentDir,
+                                       self.torrentFileInfo.nameOfFile), 'rb+')
+                offset += pieceNumber * self.torrentFileInfo.pieceLength
+                fp.seek(offset, 0)
+                block = fp.read(length)
+                fp.close()
+                return block, True
+            except:
+                return block, False
+        else:
+            try:
+                pieceOffset = (
+                    pieceNumber * self.torrentFileInfo.pieceLength)
+                allFiles = self.torrentFileInfo.filesInfo
+                i = 0
+                pieceLength = self.torrentFileInfo.pieceLength
+                if pieceNumber == self.torrentFileInfo.numberOfPieces-1:
+                    pieceLength = (self.torrentFileInfo.lengthOfFileToBeDownloaded -
+                                   (pieceNumber * self.torrentFileInfo.pieceLength))
+                while i < len(allFiles):
+                    if pieceOffset < allFiles[i]["length"]:
+                        # checking if the single file can contain the whole piece
+                        if pieceLength <= allFiles[i]["length"] - pieceOffset:
+                            fp = open(os.path.join(self.parentDir,
+                                                   allFiles[i]['path']), 'rb+')
+                            blockOffset = pieceOffset + offset
+                            fp.seek(blockOffset, 0)
+                            block = fp.read(length)
+                            fp.close()
+                            return block, True
+                        else:
+                            # when piece lies in multiple files
+                            piece = b''
+                            while(pieceLength > 0):
+                                pieceToRead = (
+                                    allFiles[i]["length"] - pieceOffset)
+                                fp = open(os.path.join(self.parentDir,
+                                                       allFiles[i]['path']), 'rb+')
+                                fp.seek(pieceOffset, 0)
+                                piece += fp.read(pieceToRead)
+                                fp.close()
+                                pieceLength -= (allFiles[i]
+                                                ["length"] - pieceOffset)
+                                pieceOffset = 0
+                                i += 1
+                            return piece[offset:offset + length], True
+                    else:
+                        # condition when piece size is greater than filesizes
+                        pieceOffset -= allFiles[i]["length"]
+                        i += 1
+            except:
+                return block, False

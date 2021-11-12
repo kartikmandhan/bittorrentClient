@@ -76,13 +76,14 @@ def makeRequest():
         peerAddresses = mainRequestMaker.peerAddresses
 
         print("Piece Length : ", torrentFileData.pieceLength)
-        print("Peer addresses :" , mainRequestMaker.peerAddresses)
+        print("Peer addresses :", mainRequestMaker.peerAddresses)
         workingPeers = []
         for peer in peerAddresses:
             workingPeers.append(Peer(peer[0], peer[1], mainRequestMaker))
 
         downloader = downloadAndSeed(workingPeers, torrentFileData)
-        downloader.download()
+        # downloader.download()
+        downloader.seeding()
     else:
         print("All trackers are useless")
 

@@ -4,6 +4,7 @@ import time
 import hashlib
 from math import ceil
 
+
 class PeerWireProtocol:
 
     def _generateInterestedMsg(self):
@@ -135,7 +136,11 @@ class PeerWireProtocol:
                 current += (lenPrefix-1) + payloadStartIndex
             if ID == 6:
                 # Request
-                pass
+                payload = response[current + payloadStartIndex:(
+                    lenPrefix-1) + current + payloadStartIndex]
+                index, begin, length = struct.unpack("!iii", payload)
+                peerMessages["request"] = [index, begin, length]
+                current += (lenPrefix-1) + payloadStartIndex
             if ID == 7:
                 # piece
                 payload = response[current + payloadStartIndex:(
@@ -162,7 +167,7 @@ class PeerWireProtocol:
 
 
 class Peer(PeerWireProtocol):
-    def __init__(self, IP, port, torrentFileInfo):
+    def __init__(self, IP, port, torrentFileInfo, peerSocket=None):
         self.infoHash = torrentFileInfo.infoHash
         self.myPeerID = torrentFileInfo.peerID
         self.numberOfPieces = len(torrentFileInfo.hashOfPieces)
@@ -172,18 +177,25 @@ class Peer(PeerWireProtocol):
         self.IP = IP
         self.port = port
         # initial state is client not interested
-        self.state=peerState()
-        self.keepAliveTimeout = 10
+        self.state = peerState()
+        self.keepAliveTimeout = 120
         # keep alive timer
         self.keepAliveTimer = None
         self.bitfield = set()
-        self.connectionSocket = socket(AF_INET, SOCK_STREAM)
+        if peerSocket == None:
+            # this for downloading
+            self.connectionSocket = socket(AF_INET, SOCK_STREAM)
+        else:
+            # this is for seeding
+            self.connectionSocket = peerSocket
         self.isHandshakeDone = False
         # since makeConnectiona doHandshake Both require timeout
         self.connectionSocket.settimeout(4)
         self.isConnectionAlive = False
         # to keep track if peer is currently being requested a piece
-        self.isDownloading=False
+        self.isDownloading = False
+        self.myBitFieldList = []
+        self.fileOperations = fileOperations(torrentFileInfo)
 
     def decodeHandshakeResponse(self, response):
         if(len(response) < 68):
@@ -212,6 +224,29 @@ class Peer(PeerWireProtocol):
             self.disconnectPeer()
             return False
 
+    def receiveHandshake(self):
+        try:
+            HANDSHAKE_PACKET_LENGTH = 68
+            handshakeResponse = self.connectionSocket.recv(
+                HANDSHAKE_PACKET_LENGTH)
+            # print("Handshake Response :", handshakeResponse, len(handshakeResponse))
+            recvdinfoHash, handshakeLen = self.decodeHandshakeResponse(
+                handshakeResponse)
+            # print("my infohash", self.infoHash)
+            if(recvdinfoHash == self.infoHash):
+                self.isHandshakeDone = True
+                print("Info Hash matched")
+                self.connectionSocket.settimeout(4)
+                return True
+            else:
+                self.isHandshakeDone = False
+                print("Received Incorrect Info Hash")
+                return False
+        except Exception as errorMsg:
+            self.isHandshakeDone = False
+            print("Error in receiveHandshake ", errorMsg)
+            return False
+
     def doHandshake(self):
         self.connectionSocket.settimeout(25)
         if not self.isConnectionAlive:
@@ -223,31 +258,14 @@ class Peer(PeerWireProtocol):
                 self.infoHash, self.myPeerID)
             try:
                 self.connectionSocket.send(handshakePacket)
-                HANDSHAKE_PACKET_LENGTH = 68
-                handshakeResponse = self.connectionSocket.recv(
-                    HANDSHAKE_PACKET_LENGTH)
-                # print("Handshake Response :", handshakeResponse, len(handshakeResponse))
-                recvdinfoHash, handshakeLen = self.decodeHandshakeResponse(
-                    handshakeResponse)
-                # print("my infohash", self.infoHash)
-                if(recvdinfoHash == self.infoHash):
-                    self.isHandshakeDone = True
-                    print("Info Hash matched")
-                    self.connectionSocket.settimeout(4)
-                    return True
-                else:
-                    # self.connectionSocket.close()
-
-                    # self.isConnectionAlive = False
-                    self.isHandshakeDone = False
-                    # self.disconnectPeer()
-                    print("Received Incorrect Info Hash")
-                    return False
+                return self.receiveHandshake()
             except Exception as errorMsg:
                 print("Error in doHandshake : ", errorMsg, handshakeResponse)
                 # self.isConnectionAlive = False
                 self.disconnectPeer()
                 return False
+        if(self.isHandshakeDone):
+            return True
         return False
 
     def sendMsg(self, ID=None, optional=None):
@@ -281,40 +299,12 @@ class Peer(PeerWireProtocol):
             print("error in sendmsg", ID)
             return False
 
-    # def receiveMsg(self):
-    #     response = b''
-    #     self.connectionSocket.settimeout(2)
-    #     timeoutCount = 0
-    #     while(1):
-    #         try:
-    #             r= self.connectionSocket.recv(4096)
-    #             response += r
-    #             # print("Receive msg", r)
-    #             if len(r) == 0:
-    #                 # self.isHandshakeDone = False
-    #                 # self.isConnectionAlive = False
-    #                 # self.connectionSocket.close()
-    #                 self.disconnectPeer()
-    #                 break
-    #         except timeout:
-    #             # print("Timeout in receiceMsg")
-    #             timeoutCount += 1
-    #             if timeoutCount >= 3:
-    #                 break
-    #         except Exception as errorMsg:
-    #             # self.isConnectionAlive = False
-    #             # self.isHandshakeDone = False
-    #             self.disconnectPeer()
-    #             print("Error in receiveMsg : ", errorMsg)
-    #             break
-    #     return response
-
     def receiveMsg(self):
         # LengthPrefix
         if self.isConnectionAlive == False:
             return None
         lengthPrefixSize = 4
-        try :
+        try:
             response = self.connectionSocket.recv(lengthPrefixSize)
             if len(response) < lengthPrefixSize:
                 return None
@@ -328,7 +318,7 @@ class Peer(PeerWireProtocol):
                 if len(r) == 0:
                     return None
                 completeResponse += r
-                lenPrefix -= len(r)        
+                lenPrefix -= len(r)
         except timeout:
             print("Unable To receive")
             return None
@@ -336,9 +326,8 @@ class Peer(PeerWireProtocol):
             self.disconnectPeer()
             print("Error in receiveMsg : ", errorMsg)
             return None
-        print(completeResponse)
+        # print(completeResponse)
         return completeResponse
-
 
     def extractBitField(self, bitfieldString):
         self.bitfield = set()
@@ -348,30 +337,29 @@ class Peer(PeerWireProtocol):
                     # since we are evaluating each bit from right to left
                     pieceNumber = i*8+7-j
                     self.bitfield.add(pieceNumber)
+
     def handleMessages(self, messages):
         if 'choke' in messages:
             self.state = DOWNSTATE0
-            print("\x1b]35mChoking ........")
+            print("Choking ........")
         if 'unchoke' in messages:
             self.state = DOWNSTATE2
         if 'keepAlive' in messages:
-            self.keepAliveTimer=time.time()
+            self.keepAliveTimer = time.time()
         if 'interested' in messages:
-            pass
+            self.state = UPSTATE1
         if 'notInterested' in messages:
-            pass
+            self.state = UPSTATE3
         if 'bitfield' in messages:
             self.extractBitField(messages['bitfield'])
         if 'have' in messages:
             # self.bitfield.add(messages['have'])
-            pass
-        if 'request' in messages:
-            pass
-        
-    def peerFSM( self,pieceNumber):
+            print("recieved have msg", messages["have"])
+
+    def peerFSM(self, pieceNumber):
         isPieceDownloaded = (False, b'')
         isFiniteMachineON = True
-        #DOWNSTATE are the objects of peerState Class
+        # DOWNSTATE are the objects of peerState Class
         count = 0
         while isFiniteMachineON:
             # print(self.state)
@@ -379,7 +367,7 @@ class Peer(PeerWireProtocol):
             if(self.state == DOWNSTATE0):
                 if(self.sendMsg(2)):
                     # print("Changing state..")
-                    self.state=DOWNSTATE1
+                    self.state = DOWNSTATE1
                 else:
                     count += 1
                     if count > 3:
@@ -387,7 +375,7 @@ class Peer(PeerWireProtocol):
 
             # client state 1    : (client = interested,      peer = choking)
             elif(self.state == DOWNSTATE1):
-                # recieve message 
+                # recieve message
                 # print("Response : 1")
                 response = self.receiveMsg()
                 # print("Response : 2")
@@ -400,17 +388,17 @@ class Peer(PeerWireProtocol):
 
             # client state 2    : (client = interested,      peer = not choking)
             elif(self.state == DOWNSTATE2):
-                # download the piece when in this state 
+                # download the piece when in this state
                 isPieceDownloaded = self.downloadPiece(pieceNumber)
                 isFiniteMachineON = False
 
             #   think of sending uninterested messages in this state of FSM
-            elif(self.state==DOWNSTATE3):
+            elif(self.state == DOWNSTATE3):
                 isFiniteMachineON = False
 
         return isPieceDownloaded
-        
-    def downloadPiece(self,pieceNumber):
+
+    def downloadPiece(self, pieceNumber):
         print("Downloading Piece ..", pieceNumber, flush='true')
         ###
         BLOCK_SIZE = 2**14
@@ -418,7 +406,7 @@ class Peer(PeerWireProtocol):
         currentPieceLength = self.torrentFileInfo.pieceLength
         if pieceNumber == self.torrentFileInfo.numberOfPieces-1:
             currentPieceLength = (self.torrentFileInfo.lengthOfFileToBeDownloaded -
-                                (pieceNumber * self.torrentFileInfo.pieceLength))
+                                  (pieceNumber * self.torrentFileInfo.pieceLength))
             numberOfBlocks = ceil(currentPieceLength/BLOCK_SIZE)
             print("last piecelength", currentPieceLength, numberOfBlocks)
         ###
@@ -431,7 +419,8 @@ class Peer(PeerWireProtocol):
                 currentBlockLength = BLOCK_SIZE
             else:
                 currentBlockLength = currentPieceLength - offset
-            print(currentBlockLength, currentPieceLength, numberOfBlocks, blockNumber, pieceNumber)
+            print(currentBlockLength, currentPieceLength,
+                  numberOfBlocks, blockNumber, pieceNumber)
             block = self.downloadBlock(pieceNumber, offset, currentBlockLength)
             if len(block) == 0:
                 print("Unable to Download block", blockNumber, pieceNumber)
@@ -455,6 +444,7 @@ class Peer(PeerWireProtocol):
         self.bitfield = set()
         self.isDownloading = False
         # self.connectionSocket.close()
+
     def downloadBlock(self, pieceNumber, offset, blockLength):
         if self.isHandshakeDone == False:
             print("hndshake not done .....")
@@ -477,53 +467,151 @@ class Peer(PeerWireProtocol):
             print("Retrying ......")
         return b''
 
-    # def isAbleToDownload(self):
-    #     if self.isConnectionAlive == False or self.isHandshakeDone == False:
-    #         return False
-    #     return True
+#  upload and leechers related functions
+
+    def startSeeding(self):
+        try:
+            self.clietSock.bind((self.IP, self.port))
+            self.clientSock.listen()
+        except Exception as errorMsg:
+            print("Error in startSeeding", errorMsg)
+
+    def acceptConnection(self):
+        try:
+            connectionSocket = self.clientSock.accept()
+            return connectionSocket
+        except Exception as erroMsg:
+            print("Error in acceptConnection ", erroMsg)
+            return None
+
+    def createBitField(self):
+        bitfield = b""
+        pieceByte = 0
+        for i in range(self.torrentFileInfo.numberOfPieces):
+            if i in self.myBitFieldList:
+                piece_byte = piece_byte | (2 ** (7 - (i % 8)))
+            if (i + 1) % 8 == 0:
+                bitfield += struct.pack("!B", pieceByte)
+                pieceByte = 0
+        # adding the last piece's bytes
+        if self.torrentFileInfo.numberOfPieces % 8 != 0:
+            bitfield += struct.pack("!B", pieceByte)
+
+        return bitfield
+
+    def sendBitfield(self):
+        self._generateBitFieldMsg(self.createBitField())
+        self.sendMsg(5)
+
+    def respondHandshake(self):
+        self.keepAliveTimer = time.time()
+        while(time.time() - self.keepAliveTimer < self.keepAliveTimeout):
+            if(self.receiveHandshake()):
+                try:
+                    handshakePacket = self.makeHandshakePacket(
+                        self.infoHash, self.myPeerID)
+                    self.connectionSocket.send(handshakePacket)
+                    self.sendBitfield()
+                    return True
+                except Exception as errorMsg:
+                    print("Error in respondHandshake", errorMsg)
+        return False
+
+    def uploadFSM(self):
+        self.keepAliveTimer = time.time()
+        isFiniteMachineON = True
+        while isFiniteMachineON:
+            # checking for timeouts in states
+            if(time.time() - self.keepAliveTimer > self.keepAliveTimeout):
+                self.state = UPSTATE3
+                self.disconnectPeer()
+            # client state 0    : (client = not interested, peer = choking)
+            if(self.state == UPSTATE0):
+                response_message = self.handleMessages()
+            # client state 1    : (client = interested,     peer = choking)
+            elif(self.state == UPSTATE1):
+                if(self.sendMsg(1)):
+                    self.state = UPSTATE2
+                else:
+                    isFiniteMachineON = False
+            # client state 2    : (client = interested,     peer = not choking)
+            elif(self.state == UPSTATE2):
+                self.uploadPieces()
+                isFiniteMachineON = False
+            # client state 3    : (client = None,           peer = None)
+            elif(self.state == UPSTATE3):
+                isFiniteMachineON = False
+
+    def uploadInitiator(self):
+        if self.respondHandshake():
+            self.uploadFSM()
+        else:
+            return
+
+    def uploadPieces(self):
+        self.keepAliveTimer = time.time()
+        while(time.time() - self.keepAliveTimer < self.keepAliveTimeout):
+            response = self.receiveMsg()
+            if response == None:
+                continue
+            response = self.decodeMsg(response)
+            self.handleMessages(response)
+            if "request" in response:
+                pieceIndex = response["request"][0]
+                offset = response["request"][1]
+                length = response["request"][2]
+                block, isValid = fileOperations.readBlock(
+                    pieceIndex, offset, length)
+                if(isValid):
+                    self.sendMsg(7, (pieceIndex, offset, block))
+                else:
+                    print("Invalid Request for block")
+
 
 class peerState():
     def __init__(self):
-        self.am_choking = True   
+        self.am_choking = True
         self.am_interested = False
-        self.peer_choking = True   
-        self.peer_interested = False           
-    
-    def makeDeadState(self):
-        self.am_choking = None  
-        self.am_interested = None
-        self.peer_choking = None  
-        self.peer_interested = None           
+        self.peer_choking = True
+        self.peer_interested = False
 
-    def __eq__(self, other): 
-        if self.am_choking != other.am_choking :
+    def makeDeadState(self):
+        self.am_choking = None
+        self.am_interested = None
+        self.peer_choking = None
+        self.peer_interested = None
+
+    def __eq__(self, other):
+        if self.am_choking != other.am_choking:
             return False
         if self.am_interested != other.am_interested:
             return False
-        if self.peer_choking != other.peer_choking: 
+        if self.peer_choking != other.peer_choking:
             return False
         if self.peer_interested != other.peer_interested:
             return False
         return True
-    
-    def  __ne__(self, other):
+
+    def __ne__(self, other):
         return not self.__eq__(other)
 
     def __str__(self):
-        peer_state_log  = '[ client choking : '     + str(self.am_choking)
-        peer_state_log += ', client interested : '  + str(self.am_interested) 
-        peer_state_log += ', peer choking : '       + str(self.peer_choking)
-        peer_state_log += ', peer interested : '    + str(self.peer_interested) + ']'
+        peer_state_log = '[ client choking : ' + str(self.am_choking)
+        peer_state_log += ', client interested : ' + str(self.am_interested)
+        peer_state_log += ', peer choking : ' + str(self.peer_choking)
+        peer_state_log += ', peer interested : ' + \
+            str(self.peer_interested) + ']'
         return peer_state_log
+
 
 DOWNSTATE0 = peerState()
 
 DOWNSTATE1 = peerState()
-DOWNSTATE1.am_interested   = True
-    
+DOWNSTATE1.am_interested = True
+
 DOWNSTATE2 = peerState()
-DOWNSTATE2.am_interested   = True
-DOWNSTATE2.peer_choking    = False
+DOWNSTATE2.am_interested = True
+DOWNSTATE2.peer_choking = False
 
 DOWNSTATE3 = peerState()
 DOWNSTATE3.makeDeadState()
@@ -532,20 +620,10 @@ UPSTATE0 = peerState()
 
 UPSTATE1 = peerState()
 UPSTATE1.peer_interested = True
-   
+
 UPSTATE2 = peerState()
 UPSTATE2.peer_interested = True
 UPSTATE2.am_choking = False
 
 UPSTATE3 = peerState()
 UPSTATE3.makeDeadState()
-
-
-# b'\x00\x00\x00b\x14\x00d1:md11:ut_metadatai2ee13:metadata_sizei1789e4:reqqi255e11:upload_onlyi1e1:v16:Halite v 0.4.0.3e'
-# b'\x00\x00\x00]\x14\x00d1:md11:ut_metadatai2ee13:metadata_sizei1789e4:reqqi255e11:upload_onlyi1e1:v11:Tixati 2.18e'
-# b'\x00\x00\x00b\x14\x00d1:md11:ut_metadatai2ee13:metadata_sizei1789e4:reqqi255e11:upload_onlyi1e1:v16:Halite v 0.3.4.0e'
-# b'\x00\x00\x00]\x14\x00d1:md11:ut_metadatai2ee13:metadata_sizei1789e4:reqqi255e11:upload_onlyi1e1:v11:Tixati 2.12e'
-# HandShake Successful .. 
-# b'\x00\x00\x00]\x14\x00d1:md11:ut_metadatai2ee13:metadata_sizei1789e4:reqqi255e11:upload_onlyi1e1:v11:Tixati 2.15e'
-# b'\x00\x00\x00b\x14\x00d1:md11:ut_metadatai2ee13:metadata_sizei1789e4:reqqi255e11:upload_onlyi1e1:v16:Halite v 0.4.0.2e'
-# b'\x00\x00\x00d\x14\x00d1:md11:ut_metadatai2ee13:metadata_sizei1789e4:reqqi255e11:upload_onlyi1e1:v18:qBittorrent v3.3.1e'
