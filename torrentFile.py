@@ -69,12 +69,12 @@ class FileInfo:
     def extractFileMetaData(self):
         fp = open(self.fileName, "rb")
         fileContent = bencodepy.decode(fp.read())
-        print(fileContent)
+        # print(fileContent)
         if b"announce" in fileContent:
             self.announceURL = fileContent[b"announce"].decode()
         # if b"encoding" in fileContent:
         #     self.encoding = fileContent[b"encoding"].decode()
-        
+
         self.infoDictionary = fileContent[b"info"]
         self.nameOfFile = self.infoDictionary[b"name"].decode()
         self.pieces = self.infoDictionary[b"pieces"]
@@ -117,7 +117,8 @@ class httpTracker(FileInfo):
                   "downloaded": self.downloaded, "left": self.lengthOfFileToBeDownloaded, "compact": 1}
         # print(urllib.parse.urlencode(params))
         try:
-            announceResponse = requests.get(self.announceURL, params, timeout = 10).content
+            announceResponse = requests.get(
+                self.announceURL, params, timeout=10).content
         except:
             print("Error : request module")
             return False

@@ -3,6 +3,7 @@ from socket import *
 import time
 import hashlib
 from math import ceil
+from fileOperations import *
 
 
 class PeerWireProtocol:
@@ -171,7 +172,7 @@ class Peer(PeerWireProtocol):
         self.infoHash = torrentFileInfo.infoHash
         self.myPeerID = torrentFileInfo.peerID
         self.numberOfPieces = len(torrentFileInfo.hashOfPieces)
-        self.peerAddresses = torrentFileInfo.peerAddresses
+        # self.peerAddresses = torrentFileInfo.peerAddresses
         # timepass nikal dege
         self.torrentFileInfo = torrentFileInfo
         self.IP = IP
@@ -452,19 +453,16 @@ class Peer(PeerWireProtocol):
         if self.peer_choking == True:
             print("choking  .....")
             return b''
-        retries = 0
-        while(retries < 3):
-            if self.isConnectionAlive == False:
-                print("Connection Not Alive ..")
-                break
-            if(self.sendMsg(6, (pieceNumber, offset, blockLength))):
-                # peer.connectionSocket.settimeout(None)
-                response = self.decodeMsg(self.receiveMsg())
-                if response and 'piece' in response:
-                    # print("response of piece : ", response, flush='true')
+        if self.isConnectionAlive == False:
+            print("Connection Not Alive ..")
+        if(self.sendMsg(6, (pieceNumber, offset, blockLength))):
+            # peer.connectionSocket.settimeout(None)
+            response = self.decodeMsg(self.receiveMsg())
+            if response and 'piece' in response:
+                print("Block Received ",
+                      response['piece'][0], response['piece'][1]//(blockLength), flush='true')
+                if pieceNumber == response['piece'][0] and offset == response['piece'][1]:
                     return response['piece'][2]
-            retries += 1
-            print("Retrying ......")
         return b''
 
 #  upload and leechers related functions
@@ -472,13 +470,13 @@ class Peer(PeerWireProtocol):
     def startSeeding(self):
         try:
             self.clietSock.bind((self.IP, self.port))
-            self.clientSock.listen()
+            self.connectionSocket.listen()
         except Exception as errorMsg:
             print("Error in startSeeding", errorMsg)
 
     def acceptConnection(self):
         try:
-            connectionSocket = self.clientSock.accept()
+            connectionSocket = self.connectionSocket.accept()
             return connectionSocket
         except Exception as erroMsg:
             print("Error in acceptConnection ", erroMsg)

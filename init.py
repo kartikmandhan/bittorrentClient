@@ -3,7 +3,7 @@ import sys
 from torrentFile import *
 from peerWireProtocol import *
 from math import ceil
-from threading import Thread, get_native_id
+from threading import Thread, get_native_id, Timer
 import hashlib
 from downloadAndSeed import *
 try:
@@ -15,9 +15,20 @@ except:
 
 torrentFileData = FileInfo(sys.argv[1])
 torrentFileData.extractFileMetaData()
+
 # print(torrentFileData)
 # print(torrentFileData.infoDictionary[b"files"])
-print("Paths :", torrentFileData.filesInfo)
+# print("Paths :", torrentFileData.filesInfo)
+
+
+def setInterval(func, sec):
+    def func_wrapper():
+        setInterval(func, sec)
+        func()
+    t = Timer(sec, func_wrapper)
+    t.daemon = True
+    t.start()
+    return t
 
 
 def tryAllTrackerURLs(udpRequestMaker, httpRequestMaker):
@@ -42,12 +53,12 @@ def tryAllTrackerURLs(udpRequestMaker, httpRequestMaker):
 # this returns empty list once all pieces are requested
 
 
-def makeRequest():
+def getPeers():
     udpRequestMaker = udpTracker(fileName)
     httpRequestMaker = httpTracker(fileName)
     didWeRecieveAddresses = False
     didUDPAnswer = -1
-    print(torrentFileData.announceList)
+    # print(torrentFileData.announceList)
     if len(torrentFileData.announceList) > 0:
         for i in range(5):
             didWeRecieveAddresses, didUDPAnswer = tryAllTrackerURLs(
@@ -76,23 +87,52 @@ def makeRequest():
         peerAddresses = mainRequestMaker.peerAddresses
 
         print("Piece Length : ", torrentFileData.pieceLength)
-        print("Peer addresses :", mainRequestMaker.peerAddresses)
+        print("Peer addresses :", peerAddresses)
         workingPeers = []
         for peer in peerAddresses:
-            workingPeers.append(Peer(peer[0], peer[1], mainRequestMaker))
-
-        downloader = downloadAndSeed(workingPeers, torrentFileData)
-        # downloader.download()
-        downloader.seeding()
+            workingPeers.append(Peer(peer[0], peer[1], torrentFileData))
+        return workingPeers, True
     else:
         print("All trackers are useless")
-
-    # if(pwp.handshakeRequest() == False):
-    #     # close connection
-    #     pass
-    # else:
-    #     print("All trackers are useless")
+        return [], False
 
 
+def wrapper():
+    global downloader
+    print("\n\n\n\nwraper called\n\n\n\n")
+
+    workingPeers, gotPeers = getPeers()
+    if(gotPeers):
+        for peer1 in workingPeers:
+            isMatched = False
+            for peer2 in downloader.allPeers:
+                if peer1.IP == peer2.IP and peer1.port == peer2.port:
+                    isMatched = True
+                    break
+            if not isMatched:
+                downloader.allPeers.append(peer1)
+        downloader.createPeerThreads()
+
+
+downloader = downloadAndSeed([], torrentFileData)
+
+interval = 20
+
+
+def makeRequest():
+    global downloader
+    global interval
+    workingPeers, gotPeers = getPeers()
+    t = setInterval(wrapper, interval)
+    if(gotPeers):
+        downloader.allPeers.extend(workingPeers)
+        downloader.download()
+    interval += 10
+
+
+startTime = time.time()
 makeRequest()
+endTime = time.time()
+print("speed:", (torrentFileData.lengthOfFileToBeDownloaded //
+      (endTime-startTime))*0.008, "kbps")
 # pwp = PeerWireProtocol(torrentFileData)
