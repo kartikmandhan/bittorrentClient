@@ -1,4 +1,5 @@
 import os
+from loggerConfig import logger
 
 
 class fileOperations():
@@ -11,11 +12,6 @@ class fileOperations():
         if self.isMultiFile:
             self.parentDir += torrentFileInfo.nameOfFile
 
-    def writeNullToFile(self, fp, size):
-        # data = b"\x00" * size
-        # fp.write(data)
-        pass
-
     def writePieceInFile(self, pieceNumber, piece, filePath):
         with open(os.path.join(self.parentDir, filePath), 'rb+') as fp:
             fp.seek(pieceNumber*self.torrentFileInfo.pieceLength, 0)
@@ -27,23 +23,21 @@ class fileOperations():
                 filePath = file["path"]
                 dirs = os.path.dirname(filePath)
                 # print("dirs", dirs)
-                print("parent", self.parentDir)
+                logger.info("parent directory: " + self.parentDir)
                 if len(dirs) > 0:
                     dirsPath = os.path.join(self.parentDir, dirs)
                 else:
                     dirsPath = self.parentDir
                 # print("dirspath", self.parentDir, dirsPath)
                 if not os.path.exists(dirsPath):
-                    print("herer")
                     os.makedirs(dirsPath)
                 # create files at specified location
                 with open(os.path.join(self.parentDir, filePath), 'wb') as fp:
-                    self.writeNullToFile(fp, file["length"])
+
                     pass
         else:
             with open(os.path.join(self.parentDir, self.torrentFileInfo.nameOfFile), 'wb') as fp:
-                self.writeNullToFile(
-                    fp, self.torrentFileInfo.lengthOfFileToBeDownloaded)
+                pass
 
     def writePiece(self, pieceNumber, piece):
 

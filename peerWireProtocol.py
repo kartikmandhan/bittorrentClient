@@ -4,6 +4,8 @@ import time
 import hashlib
 from math import ceil
 from fileOperations import *
+from loggerConfig import logger
+from Stats import Stats
 
 
 class PeerWireProtocol:
@@ -93,82 +95,86 @@ class PeerWireProtocol:
         payloadStartIndex = 5
         current = 0
         peerMessages = {}
-        while(current != len(response)):
-            if(len(response) - current < 4):
-                return {"error": "Invalid Response"}
-            lenPrefix = struct.unpack("!i", response[current: current + 4])[0]
-            if(lenPrefix == 0):
-                peerMessages["keepAlive"] = True
-                current += payloadStartIndex - 1
-                continue
-            ID = struct.unpack("!b", response[current + 4: current + 5])
-            ID = int.from_bytes(ID, "big")
+        try:
+            while(current != len(response)):
+                if(len(response) - current < 4):
+                    return {"error": "Invalid Response"}
+                lenPrefix = struct.unpack(
+                    "!i", response[current: current + 4])[0]
+                if(lenPrefix == 0):
+                    peerMessages["keepAlive"] = True
+                    current += payloadStartIndex - 1
+                    continue
+                ID = struct.unpack("!b", response[current + 4: current + 5])
+                ID = int.from_bytes(ID, "big")
 
-            if ID == 0:
-                # choke
-                peerMessages["choke"] = True
-                current += payloadStartIndex
-            if ID == 1:
-                # unchoke
-                peerMessages["unchoke"] = True
-                current += payloadStartIndex
-                self.peer_choking = False
-            if ID == 2:
-                # interested
-                peerMessages["interested"] = True
-                current += payloadStartIndex
-            if ID == 3:
-                # not interested
-                peerMessages["notInterested"] = True
-                current += payloadStartIndex
-            if ID == 4:
-                # have
-                pieceIndex = struct.unpack(
-                    "!i", response[current + payloadStartIndex: current + payloadStartIndex + 4])
-                peerMessages["have"] = pieceIndex
-                current += (lenPrefix-1) + payloadStartIndex
-            if ID == 5:
-                # since lenPrefix=lenofpayload+ 1 byte of ID
-                bitfield = response[current + payloadStartIndex:(lenPrefix-1) +
-                                    current + payloadStartIndex]
-                # print("Bitfield : \n", len(bitfield)*8)
-                peerMessages["bitfield"] = bitfield
-                # return ("bitfield", bitfield)
-                current += (lenPrefix-1) + payloadStartIndex
-            if ID == 6:
-                # Request
-                payload = response[current + payloadStartIndex:(
-                    lenPrefix-1) + current + payloadStartIndex]
-                index, begin, length = struct.unpack("!iii", payload)
-                peerMessages["request"] = [index, begin, length]
-                current += (lenPrefix-1) + payloadStartIndex
-            if ID == 7:
-                # piece
-                payload = response[current + payloadStartIndex:(
-                    lenPrefix-1) + current + payloadStartIndex]
-                index, begin = struct.unpack("!ii", payload[:8])
-                block = payload[8:]
-                peerMessages["piece"] = [index, begin, block]
-                # return ("piece", [index, begin, block])
-                current += (lenPrefix-1) + payloadStartIndex
-            if ID == 8:
-                payload = response[current + payloadStartIndex:(
-                    lenPrefix-1) + current + payloadStartIndex]
-                index, begin = struct.unpack("!ii", payload[:8])
-                length = payload[8:]
-                peerMessages["cancel"] = [index, begin, length]
-                # return ("piece", [index, begin, block])
-                current += (lenPrefix-1) + payloadStartIndex
-            if ID == 9:
-                listenPort = struct.unpack(
-                    "!h", response[current + payloadStartIndex:current + payloadStartIndex + 2])
-                peerMessages["port"] = listenPort
-                current += (lenPrefix-1) + payloadStartIndex
-        return peerMessages
+                if ID == 0:
+                    # choke
+                    peerMessages["choke"] = True
+                    current += payloadStartIndex
+                if ID == 1:
+                    # unchoke
+                    peerMessages["unchoke"] = True
+                    current += payloadStartIndex
+                    self.peer_choking = False
+                if ID == 2:
+                    # interested
+                    peerMessages["interested"] = True
+                    current += payloadStartIndex
+                if ID == 3:
+                    # not interested
+                    peerMessages["notInterested"] = True
+                    current += payloadStartIndex
+                if ID == 4:
+                    # have
+                    pieceIndex = struct.unpack(
+                        "!i", response[current + payloadStartIndex: current + payloadStartIndex + 4])
+                    peerMessages["have"] = pieceIndex
+                    current += (lenPrefix-1) + payloadStartIndex
+                if ID == 5:
+                    # since lenPrefix=lenofpayload+ 1 byte of ID
+                    bitfield = response[current + payloadStartIndex:(lenPrefix-1) +
+                                        current + payloadStartIndex]
+                    # logger.info("Bitfield : \n", len(bitfield)*8)
+                    peerMessages["bitfield"] = bitfield
+                    # return ("bitfield", bitfield)
+                    current += (lenPrefix-1) + payloadStartIndex
+                if ID == 6:
+                    # Request
+                    payload = response[current + payloadStartIndex:(
+                        lenPrefix-1) + current + payloadStartIndex]
+                    index, begin, length = struct.unpack("!iii", payload)
+                    peerMessages["request"] = [index, begin, length]
+                    current += (lenPrefix-1) + payloadStartIndex
+                if ID == 7:
+                    # piece
+                    payload = response[current + payloadStartIndex:(
+                        lenPrefix-1) + current + payloadStartIndex]
+                    index, begin = struct.unpack("!ii", payload[:8])
+                    block = payload[8:]
+                    peerMessages["piece"] = [index, begin, block]
+                    # return ("piece", [index, begin, block])
+                    current += (lenPrefix-1) + payloadStartIndex
+                if ID == 8:
+                    payload = response[current + payloadStartIndex:(
+                        lenPrefix-1) + current + payloadStartIndex]
+                    index, begin = struct.unpack("!ii", payload[:8])
+                    length = payload[8:]
+                    peerMessages["cancel"] = [index, begin, length]
+                    # return ("piece", [index, begin, block])
+                    current += (lenPrefix-1) + payloadStartIndex
+                if ID == 9:
+                    listenPort = struct.unpack(
+                        "!h", response[current + payloadStartIndex:current + payloadStartIndex + 2])
+                    peerMessages["port"] = listenPort
+                    current += (lenPrefix-1) + payloadStartIndex
+            return peerMessages
+        except:
+            logger.info("error in decodemsg")
 
 
 class Peer(PeerWireProtocol):
-    def __init__(self, IP, port, torrentFileInfo, peerSocket=None):
+    def __init__(self, IP, port, torrentFileInfo, peerSocket=None, fileHandler=None):
         self.infoHash = torrentFileInfo.infoHash
         self.myPeerID = torrentFileInfo.peerID
         self.numberOfPieces = len(torrentFileInfo.hashOfPieces)
@@ -196,11 +202,13 @@ class Peer(PeerWireProtocol):
         # to keep track if peer is currently being requested a piece
         self.isDownloading = False
         self.myBitFieldList = []
-        self.fileOperations = fileOperations(torrentFileInfo)
+        if fileHandler != None:
+            self.fileOperations = fileHandler
+        self.peerStats = Stats(torrentFileInfo)
 
     def decodeHandshakeResponse(self, response):
         if(len(response) < 68):
-            print("Bad response in handshake", response)
+            logger.info("Bad response in handshake " + str(response))
             return (b'', len(response))
         pstrlen = struct.unpack("!b", response[:1])
         pstrlen = int.from_bytes(pstrlen, 'big')
@@ -211,7 +219,8 @@ class Peer(PeerWireProtocol):
         # recvdinfoHash = recvdinfoHash.decode()
         peerID = struct.unpack(
             "!20s", response[pstrlen + 29:pstrlen + 49])[0]
-        print(pstrlen, pstr, reserved, recvdinfoHash, peerID)
+        logger.info(str(pstrlen) + " " + str(pstr) + " " +
+                    str(reserved) + " " + str(recvdinfoHash) + " " + str(peerID))
         return (recvdinfoHash, pstrlen + 49)
 
     def makeConnection(self):
@@ -220,7 +229,7 @@ class Peer(PeerWireProtocol):
             self.isConnectionAlive = True
             return True
         except Exception as errorMsg:
-            print("Unable Establish TCP Connection", errorMsg)
+            logger.info("Unable Establish TCP Connection")
             # self.isConnectionAlive = False
             self.disconnectPeer()
             return False
@@ -230,22 +239,23 @@ class Peer(PeerWireProtocol):
             HANDSHAKE_PACKET_LENGTH = 68
             handshakeResponse = self.connectionSocket.recv(
                 HANDSHAKE_PACKET_LENGTH)
-            # print("Handshake Response :", handshakeResponse, len(handshakeResponse))
+            # logger.info("Handshake Response : " +  handshakeResponse +  str(len(handshakeResponse)))
             recvdinfoHash, handshakeLen = self.decodeHandshakeResponse(
                 handshakeResponse)
-            # print("my infohash", self.infoHash)
+            # logger.info("my infohash " + str(self.infoHash))
             if(recvdinfoHash == self.infoHash):
                 self.isHandshakeDone = True
-                print("Info Hash matched")
+                logger.info("Info Hash matched")
                 self.connectionSocket.settimeout(4)
+                self.keepAliveTimer = time.time()
                 return True
             else:
                 self.isHandshakeDone = False
-                print("Received Incorrect Info Hash")
+                logger.info("Received Incorrect Info Hash")
                 return False
         except Exception as errorMsg:
             self.isHandshakeDone = False
-            print("Error in receiveHandshake ", errorMsg)
+            logger.info("Error in receiveHandshake ")
             return False
 
     def doHandshake(self):
@@ -261,7 +271,7 @@ class Peer(PeerWireProtocol):
                 self.connectionSocket.send(handshakePacket)
                 return self.receiveHandshake()
             except Exception as errorMsg:
-                print("Error in doHandshake : ", errorMsg, handshakeResponse)
+                logger.info("Error in doHandshake : " + str(handshakeResponse))
                 # self.isConnectionAlive = False
                 self.disconnectPeer()
                 return False
@@ -297,7 +307,7 @@ class Peer(PeerWireProtocol):
         except:
             # self.isConnectionAlive = False
             self.disconnectPeer()
-            print("error in sendmsg", ID)
+            logger.info("error in sendmsg" + str(ID))
             return False
 
     def receiveMsg(self):
@@ -321,13 +331,14 @@ class Peer(PeerWireProtocol):
                 completeResponse += r
                 lenPrefix -= len(r)
         except timeout:
-            print("Unable To receive")
+            logger.info("Unable To receive")
             return None
         except Exception as errorMsg:
             self.disconnectPeer()
-            print("Error in receiveMsg : ", errorMsg)
+            logger.info("Error in receiveMsg  ")
             return None
-        # print(completeResponse)
+        # logger.info(completeResponse)
+        self.keepAliveTimer = time.time()
         return completeResponse
 
     def extractBitField(self, bitfieldString):
@@ -342,7 +353,7 @@ class Peer(PeerWireProtocol):
     def handleMessages(self, messages):
         if 'choke' in messages:
             self.state = DOWNSTATE0
-            print("Choking ........")
+            logger.info("Choking ........")
         if 'unchoke' in messages:
             self.state = DOWNSTATE2
         if 'keepAlive' in messages:
@@ -355,7 +366,7 @@ class Peer(PeerWireProtocol):
             self.extractBitField(messages['bitfield'])
         if 'have' in messages:
             # self.bitfield.add(messages['have'])
-            print("recieved have msg", messages["have"])
+            logger.info("recieved have msg " + str(messages["have"]))
 
     def peerFSM(self, pieceNumber):
         isPieceDownloaded = (False, b'')
@@ -363,11 +374,11 @@ class Peer(PeerWireProtocol):
         # DOWNSTATE are the objects of peerState Class
         count = 0
         while isFiniteMachineON:
-            # print(self.state)
+            # logger.info(self.state)
             # client state 0    : (client = not interested,  peer = choking)
             if(self.state == DOWNSTATE0):
                 if(self.sendMsg(2)):
-                    # print("Changing state..")
+                    # logger.info("Changing state..")
                     self.state = DOWNSTATE1
                 else:
                     count += 1
@@ -377,9 +388,9 @@ class Peer(PeerWireProtocol):
             # client state 1    : (client = interested,      peer = choking)
             elif(self.state == DOWNSTATE1):
                 # recieve message
-                # print("Response : 1")
+                # logger.info("Response : 1")
                 response = self.receiveMsg()
-                # print("Response : 2")
+                # logger.info("Response : 2")
                 if response == None:
                     self.state = DOWNSTATE0
                     break
@@ -400,8 +411,9 @@ class Peer(PeerWireProtocol):
         return isPieceDownloaded
 
     def downloadPiece(self, pieceNumber):
-        print("Downloading Piece ..", pieceNumber, flush='true')
+        logger.info("Downloading Piece .." + str(pieceNumber))
         ###
+        self.peerStats.startTimer()
         BLOCK_SIZE = 2**14
         numberOfBlocks = ceil(self.torrentFileInfo.pieceLength/(BLOCK_SIZE))
         currentPieceLength = self.torrentFileInfo.pieceLength
@@ -409,7 +421,8 @@ class Peer(PeerWireProtocol):
             currentPieceLength = (self.torrentFileInfo.lengthOfFileToBeDownloaded -
                                   (pieceNumber * self.torrentFileInfo.pieceLength))
             numberOfBlocks = ceil(currentPieceLength/BLOCK_SIZE)
-            print("last piecelength", currentPieceLength, numberOfBlocks)
+            logger.info("last piecelength " +
+                        str(currentPieceLength) + " " + str(numberOfBlocks))
         ###
         piece = b''
         offset = 0
@@ -420,22 +433,28 @@ class Peer(PeerWireProtocol):
                 currentBlockLength = BLOCK_SIZE
             else:
                 currentBlockLength = currentPieceLength - offset
-            print(currentBlockLength, currentPieceLength,
-                  numberOfBlocks, blockNumber, pieceNumber)
+            logger.info(str(currentBlockLength) + " " + str(currentPieceLength) + " " +
+                        str(numberOfBlocks) + " " + str(blockNumber) + " " + str(pieceNumber))
             block = self.downloadBlock(pieceNumber, offset, currentBlockLength)
             if len(block) == 0:
-                print("Unable to Download block", blockNumber, pieceNumber)
+                logger.info("Unable to Download block" +
+                            str(blockNumber) + " " + str(pieceNumber))
                 return (False, b'')
             piece += block
             offset += len(block)
-            print("Donwloaded Block ...", blockNumber, pieceNumber)
+            logger.info("Donwloaded Block ..." +
+                        str(blockNumber) + " " + str(pieceNumber))
             blockNumber += 1
 
         pieceHash = hashlib.sha1(piece).digest()
-        print(pieceHash, self.torrentFileInfo.hashOfPieces[pieceNumber])
+        logger.info(str(pieceHash) + " " +
+                    str(self.torrentFileInfo.hashOfPieces[pieceNumber]))
         if pieceHash == self.torrentFileInfo.hashOfPieces[pieceNumber]:
-            print("pieceHash matched,writing in file , Downloaded Piece ..", pieceNumber)
+            logger.info(
+                "pieceHash matched,writing in file , Downloaded Piece .." + str(pieceNumber))
             # writePieceInFile(pieceNumber, piece)
+            self.peerStats.endTimer()
+            self.peerStats.setDownloadSpeed(pieceNumber)
             return (True, piece)
         return (False, b'')
 
@@ -448,19 +467,19 @@ class Peer(PeerWireProtocol):
 
     def downloadBlock(self, pieceNumber, offset, blockLength):
         if self.isHandshakeDone == False:
-            print("hndshake not done .....")
+            logger.info("hndshake not done .....")
             return b''
         if self.peer_choking == True:
-            print("choking  .....")
+            logger.info("choking  .....")
             return b''
         if self.isConnectionAlive == False:
-            print("Connection Not Alive ..")
+            logger.info("Connection Not Alive ..")
         if(self.sendMsg(6, (pieceNumber, offset, blockLength))):
             # peer.connectionSocket.settimeout(None)
             response = self.decodeMsg(self.receiveMsg())
             if response and 'piece' in response:
-                print("Block Received ",
-                      response['piece'][0], response['piece'][1]//(blockLength), flush='true')
+                # print("Block Received ",
+                #             str(response['piece'][0]) + " " + str(response['piece'][1]//(blockLength)))
                 if pieceNumber == response['piece'][0] and offset == response['piece'][1]:
                     return response['piece'][2]
         return b''
@@ -472,14 +491,14 @@ class Peer(PeerWireProtocol):
             self.clietSock.bind((self.IP, self.port))
             self.connectionSocket.listen()
         except Exception as errorMsg:
-            print("Error in startSeeding", errorMsg)
+            logger.info("Error in startSeeding" + errorMsg)
 
     def acceptConnection(self):
         try:
             connectionSocket = self.connectionSocket.accept()
             return connectionSocket
         except Exception as erroMsg:
-            print("Error in acceptConnection ", erroMsg)
+            logger.info("Error in acceptConnection " + erroMsg)
             return None
 
     def createBitField(self):
@@ -512,7 +531,7 @@ class Peer(PeerWireProtocol):
                     self.sendBitfield()
                     return True
                 except Exception as errorMsg:
-                    print("Error in respondHandshake", errorMsg)
+                    logger.info("Error in respondHandshake " + errorMsg)
         return False
 
     def uploadFSM(self):
@@ -548,6 +567,7 @@ class Peer(PeerWireProtocol):
 
     def uploadPieces(self):
         self.keepAliveTimer = time.time()
+        self.peerStats.startTime()
         while(time.time() - self.keepAliveTimer < self.keepAliveTimeout):
             response = self.receiveMsg()
             if response == None:
@@ -562,8 +582,10 @@ class Peer(PeerWireProtocol):
                     pieceIndex, offset, length)
                 if(isValid):
                     self.sendMsg(7, (pieceIndex, offset, block))
+                    self.peerStats.endTimer()
+                    self.peerStats.setuploadSpeed()
                 else:
-                    print("Invalid Request for block")
+                    logger.info("Invalid Request for block")
 
 
 class peerState():

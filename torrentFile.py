@@ -5,6 +5,7 @@ import urllib.parse
 import requests
 import struct
 from socket import *
+from loggerConfig import logger
 '''
     FileInfo
         ||
@@ -40,7 +41,7 @@ class FileInfo:
 
     def extractIPAdressandPort(self, ipAndPortString):
         port = int.from_bytes(ipAndPortString[-2:], "big")
-        # print(port)
+        # logger.info(port)
         ipAddress = ""
         ip = list(map(str, ipAndPortString[:4]))
         ipAddress = ".".join(ip)
@@ -69,11 +70,8 @@ class FileInfo:
     def extractFileMetaData(self):
         fp = open(self.fileName, "rb")
         fileContent = bencodepy.decode(fp.read())
-        # print(fileContent)
         if b"announce" in fileContent:
             self.announceURL = fileContent[b"announce"].decode()
-        # if b"encoding" in fileContent:
-        #     self.encoding = fileContent[b"encoding"].decode()
 
         self.infoDictionary = fileContent[b"info"]
         self.nameOfFile = self.infoDictionary[b"name"].decode()
@@ -85,7 +83,6 @@ class FileInfo:
             for i in fileContent[b"announce-list"]:
                 for j in i:
                     self.announceList.append(j.decode())
-            # print(self.announceList)
         if b"files" in self.infoDictionary:
             # multifile torrent
             for file in self.infoDictionary[b"files"]:
@@ -115,18 +112,17 @@ class httpTracker(FileInfo):
 
         params = {"info_hash": self.infoHash, "peer_id": self.peerID, "port": self.portNo, "uploaded": self.uploaded,
                   "downloaded": self.downloaded, "left": self.lengthOfFileToBeDownloaded, "compact": 1}
-        # print(urllib.parse.urlencode(params))
         try:
             announceResponse = requests.get(
                 self.announceURL, params, timeout=10).content
         except:
-            print("Error : request module")
+            logger.info("Error : request module")
             return False
         try:
             trackerResponseDict = bencodepy.decode(announceResponse)
-            print(trackerResponseDict)
+            logger.info(str(trackerResponseDict))
         except:
-            print("Unable to decode tracker response")
+            logger.info("Unable to decode tracker response")
             return False
 
         # if 'complete' in tracekerResponseDict:
@@ -138,7 +134,6 @@ class httpTracker(FileInfo):
             self.trackerInterval = trackerResponseDict[b"interval"]
 
         self.trackerPeers = trackerResponseDict[b"peers"]
-        # print(type(self.trackerPeers))
         if isinstance(self.trackerPeers, list):
             for peer in self.trackerPeers:
                 self.peerAddresses.append((peer[b'ip'], peer[b'port']))
@@ -147,9 +142,6 @@ class httpTracker(FileInfo):
 
             for i in allPeers:
                 self.peerAddresses.append(self.extractIPAdressandPort(i))
-            # print(self.peerAddresses, self.seeders,
-            #       self.leachers, len(self.peerAddresses))
-        # print(allPeers)
         return True
 
 
@@ -166,9 +158,7 @@ class udpTracker(FileInfo):
 
     def udpTrackerRequest(self):
         if(self.udpTrackerRequest1()):
-            # print("idhar hai")
             if(self.udpTrackerRequest2()):
-                # print("idhar bhi hai")
                 return True
         return False
 
@@ -176,20 +166,15 @@ class udpTracker(FileInfo):
         parsedURL = urllib.parse.urlparse(self.announceURL)
         self.connectionSocket = socket(AF_INET, SOCK_DGRAM)
         self.url = parsedURL.netloc.split(":")[0]
-        # url = "tracker.kali.org"
         self.trackerPort = parsedURL.port
-        # print(self.url,self.trackerPort)
         connectionID = 0x41727101980
         action = 0
         transactionID = random.randint(5, 1000)
-        # print(str(connectionID) + " " + str(action) + " " + str(transactionID))
         connectionRequestString = struct.pack("!q", connectionID)
         connectionRequestString += struct.pack("!i", action)
         connectionRequestString += struct.pack("!i", transactionID)
-        # print(connectionRequestString)
 
         reply = self.udprecvTrackerResponse(connectionRequestString)
-        # print(reply)
         if reply == "":
             return False
         self.actionID, self.transactionID, self.connectionID = struct.unpack(
@@ -221,9 +206,8 @@ class udpTracker(FileInfo):
         self.peerAddresses = []
         for i in allPeers:
             self.peerAddresses.append(self.extractIPAdressandPort(i))
-        print(self.peerAddresses)
+        logger.info(str(self.peerAddresses))
 
-        print(len(self.peerAddresses), self.seeders, self.leechers)
         return True
 
     def udprecvTrackerResponse(self, message):
@@ -233,7 +217,7 @@ class udpTracker(FileInfo):
             reply, trackerAdress = self.connectionSocket.recvfrom(2048)
 
         except:
-            print("timeout in udprecvTrackerResponse")
+            logger.info("timeout in udprecvTrackerResponse")
             return ""
         return reply
 

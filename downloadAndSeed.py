@@ -6,6 +6,8 @@ import sys
 from socket import *
 from fileOperations import *
 from peerWireProtocol import *
+from loggerConfig import logger
+from Stats import *
 
 
 class downloadAndSeed():
@@ -21,16 +23,17 @@ class downloadAndSeed():
         self.fileHandler = fileOperations(torrentFileInfo)
         self.clientPeer = Peer('', 6885, self.torrentFileInfo)
         self.peerThreadCreatedCount = 0
+        self.stats = Stats(torrentFileInfo)
 
     def getBitfield(self, peerNumber):
-        # print("I am in getBitfield", get_native_id(), flush="true")
+        # logger.info("I am in getBitfield", get_native_id(), flush="true")
         retry = 0
         peer = self.allPeers[peerNumber]
         while(1):
             if(peer.doHandshake()):
-                print("HandShake Successful .. ")
+                logger.info("HandShake Successful .. ")
                 response = peer.decodeMsg(peer.receiveMsg())
-                print("Response in bitfield :", response)
+                logger.info("Response in bitfield : " + str(response))
                 peer.handleMessages(response)
                 # function call for bitfield
                 self.downloadLock.acquire()
@@ -55,16 +58,16 @@ class downloadAndSeed():
     def rarestPieceFirstSelection(self):
         rarestPieces = []
         if len(self.allBitfields) == 0:
-            # print("In fun 0", rarestPieces)
+            # logger.info("In fun 0", rarestPieces)
             return rarestPieces
         # rarestCount = min(map(len, self.allBitfields.values()))
         rarestCount = min(map(lambda pieceNumber: len(
             self.allBitfields[pieceNumber]) if pieceNumber not in self.downloadedPiecesBitfields else sys.maxsize, self.allBitfields.keys()))
-        print("rarestCount", rarestCount)
+        logger.info("rarestCount " + str(rarestCount))
         for pieceNumber in self.allBitfields.keys():
             if len(self.allBitfields[pieceNumber]) == rarestCount and pieceNumber not in self.downloadedPiecesBitfields:
                 rarestPieces.append(pieceNumber)
-        # print("In fun", rarestPieces)
+        # logger.info("In fun", rarestPieces)
         return rarestPieces
 
     def createPeerThreads(self):
@@ -87,19 +90,18 @@ class downloadAndSeed():
         # self.getBitfield(peer, peerNumber)
         while self.isDownloadRemaining():
             rarestPieces = self.rarestPieceFirstSelection()
+            if len(rarestPieces) == 0:
+                continue
             if len(self.allBitfields) > 0:
-                print(self.allBitfields)
+                logger.info(str(self.allBitfields))
             allDonwloadingThreads = []
-            if len(self.downloadedPiecesBitfields) > 0:
-                print("Donwloaded Number of Pieces .....",
-                      len(self.downloadedPiecesBitfields), len(rarestPieces))
             for pieceNumber in rarestPieces:
                 peer = self.peerSelection(pieceNumber)
                 if peer == None:
 
-                    print("no peer is free", pieceNumber)
+                    # logger.info("no peer is free" + str(pieceNumber))
                     continue
-                thread = Thread(target=self.downloadPiece,
+                thread = Thread(target=self.initiateDownloadingPiece,
                                 args=(peer, pieceNumber))
                 allDonwloadingThreads.append(thread)
                 thread.start()
@@ -107,54 +109,63 @@ class downloadAndSeed():
             for thread in allDonwloadingThreads:
                 thread.join()
                 count += 1
-                print("Need to join" + str(len(allDonwloadingThreads)) +
-                      "Joined :" + str(count))
+                logger.info("Need to join" + str(len(allDonwloadingThreads)) +
+                            "Joined :" + str(count))
 
-        print("Downloaded File", self.torrentFileInfo.nameOfFile)
+        logger.info("Downloaded File " + self.torrentFileInfo.nameOfFile)
 
-    def downloadPiece(self, peer, pieceNumber):
+    def initiateDownloadingPiece(self, peer, pieceNumber):
         peer.isDownloading = True
-        startTime = time.time()
+        # startTime = time.time()
+        self.stats.startTimer()
         isPieceDownloaded, piece = peer.peerFSM(pieceNumber)
+        self.stats.endTimer()
         peer.isDownloading = False
-        endTime = time.time()
+        # endTime = time.time()
         if isPieceDownloaded == False:
             return
-        print("time taken in downloading a piece", endTime-startTime)
         self.downloadLock.acquire()
-        # print("I am Acquiring Lock")
+        # logger.info("I am Acquiring Lock")
         # self.allBitfields.pop(pieceNumber)
         self.downloadedPiecesBitfields.add(pieceNumber)
+        self.stats.setDownloadSpeed(pieceNumber)
         self.fileHandler.writePiece(pieceNumber, piece)
+
+        logger.info(self.stats.getDownloadStatistics())
+        print(self.stats.getDownloadStatistics())
+
         self.downloadLock.release()
+        print("Donwloaded Number of Pieces ....." +
+              str(len(self.downloadedPiecesBitfields)))
+        logger.info("Donwloaded Number of Pieces ....." +
+                    str(len(self.downloadedPiecesBitfields)))
+
         # peer.isDownloading = False
-        # print("I am Out of Download Piece",get_native_id())
+        # logger.info("I am Out of Download Piece",get_native_id())
 
     def seeding(self):
         self.clientPeer.startSeeding()
         while True:
             connectionRecieved = self.clientPeer.acceptConnection()
-            print("connection recvd", connectionRecieved)
-            # if connectionRecieved != None:
-            #     peerSocket, peerAddress = connectionRecieved
-            #     peerIP, peerPort = peerAddress
-            #     peerInstance = Peer(
-            #         peerIP, peerPort, self.torrentFileInfo, peerSocket)
-            #     Thread(target=peerInstance.uploadInitiator).start()
-            # else:
-            #     time.sleep(3)
+            logger.info("connection recvd " + str(connectionRecieved))
+            if connectionRecieved != None:
+                peerSocket, peerAddress = connectionRecieved
+                peerIP, peerPort = peerAddress
+                peerInstance = Peer(
+                    peerIP, peerPort, self.torrentFileInfo, peerSocket, self.fileHandler)
+                Thread(target=peerInstance.uploadInitiator).start()
+            else:
+                time.sleep(3)
 
     def peerSelection(self, pieceNumber):
         random.shuffle(self.allBitfields[pieceNumber])
         for peerNumber in self.allBitfields[pieceNumber]:
             peer = self.allPeers[peerNumber]
-            if peer.isDownloading or not peer.isConnectionAlive or not peer.isHandshakeDone:
-                print("peerNumber", peerNumber, peer.isDownloading,
-                      peer.isConnectionAlive, peer.isHandshakeDone)
+            if not peer.isDownloading and peer.isConnectionAlive and peer.isHandshakeDone:
+                # logger.info("peerNumber"+" " + str(peerNumber)+" " + str(peer.isDownloading)+" " +
+                #             str(peer.isConnectionAlive)+" " + str(peer.isHandshakeDone))
                 # if not peer.isConnectionAlive or not peer.isHandshakeDone:
                 #     Thread(target=self.getBitfield,
                 #            args=(peer, peerNumber)).start()
-                # continue
-            else:
                 return peer
         return None
