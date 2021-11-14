@@ -12,7 +12,7 @@ from Stats import *
 
 class downloadAndSeed():
 
-    def __init__(self, allPeers, torrentFileInfo):
+    def __init__(self, allPeers, torrentFileInfo, parentDir="./"):
         self.allBitfields = {}
         # self.fileDescriptor = open(torrentFileInfo.nameOfFile, "wb+")
         self.lengthOfFileToBeDownloaded = torrentFileInfo.lengthOfFileToBeDownloaded
@@ -20,9 +20,11 @@ class downloadAndSeed():
         self.downloadedPiecesBitfields = set()
         self.downloadLock = Lock()
         self.torrentFileInfo = torrentFileInfo
-        self.fileHandler = fileOperations(torrentFileInfo)
+        self.fileHandler = fileOperations(
+            torrentFileInfo, parentDir)
         self.clientPeer = Peer('', 6885, self.torrentFileInfo)
         self.peerThreadCreatedCount = 0
+        self.connectedPeers = []
         self.stats = Stats(torrentFileInfo)
 
     def getBitfield(self, peerNumber):
@@ -37,6 +39,7 @@ class downloadAndSeed():
                 peer.handleMessages(response)
                 # function call for bitfield
                 self.downloadLock.acquire()
+                self.connectedPeers.append(peer)
                 for pieceNumber in peer.bitfield:
                     if pieceNumber in self.allBitfields:
                         self.allBitfields[pieceNumber].append(peerNumber)
@@ -63,7 +66,8 @@ class downloadAndSeed():
         # rarestCount = min(map(len, self.allBitfields.values()))
         rarestCount = min(map(lambda pieceNumber: len(
             self.allBitfields[pieceNumber]) if pieceNumber not in self.downloadedPiecesBitfields else sys.maxsize, self.allBitfields.keys()))
-        logger.info("rarestCount " + str(rarestCount))
+        logger.info("rarestCount " + str(rarestCount) +
+                    " " + str(len(self.allBitfields)))
         for pieceNumber in self.allBitfields.keys():
             if len(self.allBitfields[pieceNumber]) == rarestCount and pieceNumber not in self.downloadedPiecesBitfields:
                 rarestPieces.append(pieceNumber)
@@ -129,15 +133,16 @@ class downloadAndSeed():
         # self.allBitfields.pop(pieceNumber)
         self.downloadedPiecesBitfields.add(pieceNumber)
         self.stats.setDownloadSpeed(pieceNumber)
+
         self.fileHandler.writePiece(pieceNumber, piece)
 
         logger.info(self.stats.getDownloadStatistics())
-        print(self.stats.getDownloadStatistics())
+        # print(self.stats.getDownloadStatistics())
 
         self.downloadLock.release()
-        print("Donwloaded Number of Pieces ....." +
-              str(len(self.downloadedPiecesBitfields)))
-        logger.info("Donwloaded Number of Pieces ....." +
+        # print("Downloaded Number of Pieces ....." +
+        #       str(len(self.downloadedPiecesBitfields)))
+        logger.info("Downloaded Number of Pieces ....." +
                     str(len(self.downloadedPiecesBitfields)))
 
         # peer.isDownloading = False
@@ -145,6 +150,7 @@ class downloadAndSeed():
 
     def seeding(self):
         self.clientPeer.startSeeding()
+        leechers = {}
         while True:
             connectionRecieved = self.clientPeer.acceptConnection()
             logger.info("connection recvd " + str(connectionRecieved))
@@ -153,12 +159,41 @@ class downloadAndSeed():
                 peerIP, peerPort = peerAddress
                 peerInstance = Peer(
                     peerIP, peerPort, self.torrentFileInfo, peerSocket, self.fileHandler)
-                Thread(target=peerInstance.uploadInitiator).start()
+                leechers[peerAddress] = peerInstance
+                if len(self.connectedPeers) < 4 or len(leechers.keys()) < 4:
+                    continue
+                # Top four Algorithm
+                self.seedToTop4Peers(leechers)
+
+    def seedToTop4Peers(self, leechers, seedingTo):
+        self.connectedPeers.sort(key=self.comparator, reverse=True)
+        seedingTo = {}
+        for i in range(4):
+            if i != 3:
+                peer = self.connectedPeers[i]
             else:
-                time.sleep(3)
+                r = random.randint(0, len(leechers))
+                randomLeecher = list(leechers.keys())[r]
+                peer = leechers[randomLeecher]
+            peerAddress = (peer.IP, peer.Port)
+            if peerAddress in leechers:
+                thread = Thread(
+                    target=leechers[peerAddress].uploadInitiator)
+                thread.start()
+                seedingTo[peerAddress] = leechers.pop(peerAddress)
+        time.sleep(60)
+        for peerAddress in seedingTo.keys():
+            seedingTo[peerAddress].isSeeding = False
+            leechers[peerAddress] = seedingTo.pop(peerAddress)
 
     def peerSelection(self, pieceNumber):
+
         random.shuffle(self.allBitfields[pieceNumber])
+        # peersOfParticularPiece = []
+        # for peerNumber in self.allBitfields[pieceNumber]:
+        #     peersOfParticularPiece.append(self.allPeers[peerNumber])
+
+        # peersOfParticularPiece.sort(key=self.comparator, reverse=True)
         for peerNumber in self.allBitfields[pieceNumber]:
             peer = self.allPeers[peerNumber]
             if not peer.isDownloading and peer.isConnectionAlive and peer.isHandshakeDone:
@@ -169,3 +204,8 @@ class downloadAndSeed():
                 #            args=(peer, peerNumber)).start()
                 return peer
         return None
+
+    def comparator(self, peer):
+        if not peer.isConnectionAlive:
+            return -sys.maxsize
+        return peer.peerStats.avgDownloadSpeed

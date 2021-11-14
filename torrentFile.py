@@ -37,11 +37,9 @@ class FileInfo:
         self.announceList = []
         self.peerAddresses = []
         self.numberOfPieces = 0
-        # self.encoding = ""
 
     def extractIPAdressandPort(self, ipAndPortString):
         port = int.from_bytes(ipAndPortString[-2:], "big")
-        # logger.info(port)
         ipAddress = ""
         ip = list(map(str, ipAndPortString[:4]))
         ipAddress = ".".join(ip)
@@ -68,6 +66,7 @@ class FileInfo:
             previous = i
 
     def extractFileMetaData(self):
+        # print("FileName : ", self.fileName)
         fp = open(self.fileName, "rb")
         fileContent = bencodepy.decode(fp.read())
         if b"announce" in fileContent:

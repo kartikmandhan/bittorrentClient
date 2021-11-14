@@ -3,4 +3,4 @@ logging.basicConfig(filename="newfile.log",
                     format='%(asctime)s %(message)s',
                     filemode='w')
 logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.CRITICAL)

@@ -188,6 +188,7 @@ class Peer(PeerWireProtocol):
         self.keepAliveTimeout = 120
         # keep alive timer
         self.keepAliveTimer = None
+        self.isSeeding = False
         self.bitfield = set()
         if peerSocket == None:
             # this for downloading
@@ -365,7 +366,7 @@ class Peer(PeerWireProtocol):
         if 'bitfield' in messages:
             self.extractBitField(messages['bitfield'])
         if 'have' in messages:
-            # self.bitfield.add(messages['have'])
+            self.bitfield.add(messages['have'][0])
             logger.info("recieved have msg " + str(messages["have"]))
 
     def peerFSM(self, pieceNumber):
@@ -488,17 +489,17 @@ class Peer(PeerWireProtocol):
 
     def startSeeding(self):
         try:
-            self.clietSock.bind((self.IP, self.port))
+            self.connectionSocket.bind((self.IP, self.port))
             self.connectionSocket.listen()
         except Exception as errorMsg:
-            logger.info("Error in startSeeding" + errorMsg)
+            logger.info("Error in startSeeding")
 
     def acceptConnection(self):
         try:
             connectionSocket = self.connectionSocket.accept()
             return connectionSocket
         except Exception as erroMsg:
-            logger.info("Error in acceptConnection " + erroMsg)
+            logger.info("Error in acceptConnection ")
             return None
 
     def createBitField(self):
@@ -568,7 +569,8 @@ class Peer(PeerWireProtocol):
     def uploadPieces(self):
         self.keepAliveTimer = time.time()
         self.peerStats.startTime()
-        while(time.time() - self.keepAliveTimer < self.keepAliveTimeout):
+        self.isSeeding = True
+        while(self.isSeeding and time.time() - self.keepAliveTimer < self.keepAliveTimeout):
             response = self.receiveMsg()
             if response == None:
                 continue
@@ -586,6 +588,8 @@ class Peer(PeerWireProtocol):
                     self.peerStats.setuploadSpeed()
                 else:
                     logger.info("Invalid Request for block")
+        if self.isSeeding == False:
+            self.sendMsg(0)
 
 
 class peerState():
