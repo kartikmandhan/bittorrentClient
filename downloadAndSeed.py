@@ -202,9 +202,9 @@ class downloadAndSeed():
             peer = self.allPeers[peerNumber]
             # checking
             if not peer.isDownloading and peer.isConnectionAlive and peer.isHandshakeDone:
-                if not peer.isConnectionAlive or not peer.isHandshakeDone:
-                    Thread(target=self.getBitfield,
-                           args=(peer, peerNumber)).start()
+                # if not peer.isConnectionAlive or not peer.isHandshakeDone:
+                #     Thread(target=self.getBitfield,
+                #            args=(peer, peerNumber)).start()
                 return peer
         return None
 
