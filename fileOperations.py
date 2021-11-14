@@ -22,13 +22,11 @@ class fileOperations():
             for file in self.torrentFileInfo.filesInfo:
                 filePath = file["path"]
                 dirs = os.path.dirname(filePath)
-                # print("dirs", dirs)
                 logger.info("parent directory: " + self.parentDir)
                 if len(dirs) > 0:
                     dirsPath = os.path.join(self.parentDir, dirs)
                 else:
                     dirsPath = self.parentDir
-                # print("dirspath", self.parentDir, dirsPath)
                 if not os.path.exists(dirsPath):
                     os.makedirs(dirsPath)
                 # create files at specified location

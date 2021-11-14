@@ -1,4 +1,3 @@
-# dictionary model of tracker response is yet to implement
 from downloadAndSeed import *
 from threading import Thread, Timer
 from peerWireProtocol import *
@@ -56,7 +55,6 @@ torrentFileData = FileInfo(fileName)
 torrentFileData.extractFileMetaData()
 if args["download"]:
     DOWNLOAD_PATH = args["download"]
-    # print(DOWNLOAD_PATH)
     downloader = downloadAndSeed([], torrentFileData, DOWNLOAD_PATH)
 else:
     downloader = downloadAndSeed([], torrentFileData)
@@ -72,6 +70,7 @@ MAX_INTERVAL = 180
 
 
 def setInterval(func, sec):
+    """ https://stackoverflow.com/questions/2697039/python-equivalent-of-setinterval"""
     def func_wrapper():
         setInterval(func, sec)
         func()
@@ -108,7 +107,6 @@ def getPeers():
     httpRequestMaker = httpTracker(fileName)
     didWeRecieveAddresses = False
     didUDPAnswer = -1
-    # logger.info(torrentFileData.announceList)
     if len(torrentFileData.announceList) > 0:
         for i in range(5):
             didWeRecieveAddresses, didUDPAnswer = tryAllTrackerURLs(
@@ -128,14 +126,10 @@ def getPeers():
 
     if(didWeRecieveAddresses):
         if didUDPAnswer == 1:
-            # pwp = PeerWireProtocol(udpRequestMaker)
             mainRequestMaker = udpRequestMaker
         elif didUDPAnswer == 2:
-            # pwp = PeerWireProtocol(httpRequestMaker)
             mainRequestMaker = httpRequestMaker
-
         peerAddresses = mainRequestMaker.peerAddresses
-
         logger.info("Piece Length : "+str(torrentFileData.pieceLength))
         logger.info("Peer addresses :"+str(peerAddresses))
         workingPeers = []
@@ -175,7 +169,7 @@ def createTable():
 
 def updateProgress():
     while True:
-        os.system("clear")
+        # os.system("clear")
         t = createTable()
         print(t)
         print("[{0}] {1}%".format("#" * math.floor(downloader.stats.percentdownloaded),
@@ -208,12 +202,10 @@ def wrapper():
         downloader.createPeerThreads()
     if interval < MAX_INTERVAL:
         interval += 10
-        # print("wrapperinterval", interval)
 
 
 def makeRequest():
     k = Thread(target=updateProgress)
-    # k.daemon = True
     k.start()
     global downloader
     global interval
@@ -229,8 +221,4 @@ def makeRequest():
         downloader.download()
 
 
-startTime = time.time()
 makeRequest()
-endTime = time.time()
-# print("speed:" + str((torrentFileData.lengthOfFileToBeDownloaded //
-#                       (endTime-startTime))*0.008) + "kbps")
