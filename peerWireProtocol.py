@@ -9,6 +9,9 @@ from Stats import Stats
 
 
 class PeerWireProtocol:
+    """
+        Class handles peer wire protocol messsages
+    """
 
     def _generateInterestedMsg(self):
         interested = struct.pack("!i", 1)
@@ -89,6 +92,9 @@ class PeerWireProtocol:
         return handshakePacket
 
     def decodeMsg(self, response):
+        """
+            Decode given response and returns dictionary of messages
+        """
         if response == None:
             return {}
         payloadStartIndex = 5
@@ -187,12 +193,16 @@ class Peer(PeerWireProtocol):
         if fileHandler != None:
             self.fileOperations = fileHandler
         self.peerStats = Stats(torrentFileInfo)
+        # Peer states
         self.amChoking = True
         self.amInterested = False
         self.peerChoking = True
         self.peerInterested = False
 
     def decodeHandshakeResponse(self, response):
+        """
+            Decodes handshake response and returns recieved infoHash
+        """
         if(len(response) < 68):
             logger.info("Bad response in handshake " + str(response))
             return (b'', len(response))
@@ -209,6 +219,9 @@ class Peer(PeerWireProtocol):
         return (recvdinfoHash, pstrlen + 49)
 
     def makeConnection(self):
+        """
+            Make connection with peer
+        """
         try:
             self.connectionSocket.connect((self.IP, self.port))
             self.isConnectionAlive = True
@@ -241,6 +254,9 @@ class Peer(PeerWireProtocol):
             return False
 
     def doHandshake(self):
+        """
+        Sends initial handshake message and return bool
+        """
         self.connectionSocket.settimeout(25)
         if not self.isConnectionAlive:
             self.makeConnection()
@@ -261,6 +277,9 @@ class Peer(PeerWireProtocol):
         return False
 
     def sendMsg(self, ID=None, optional=None):
+        """
+            Send message according to ID
+        """
         try:
             if ID == None:
                 self.connectionSocket.send(self._generateKeepAliveMsg())
@@ -320,15 +339,22 @@ class Peer(PeerWireProtocol):
         return completeResponse
 
     def extractBitField(self, bitfieldString):
+        """
+        Converts bitfield string from hex to list
+        """
         self.bitfield = set()
         for i, byte in enumerate(bitfieldString):
             for j in range(8):
+                # right shift a bit and logical and with 1 to see if we have a bit set
                 if ((byte >> j) & 1):
                     # since we are evaluating each bit from right to left
                     pieceNumber = i*8+7-j
                     self.bitfield.add(pieceNumber)
 
     def handleMessages(self, messages):
+        """
+            handling  messages 
+        """
         if 'choke' in messages:
             self.amInterested = False
             self.peerChoking = True
@@ -420,13 +446,10 @@ class Peer(PeerWireProtocol):
             return (True, piece)
         return (False, b'')
 
-    def disconnectPeer(self):
-        self.isHandshakeDone = False
-        self.isConnectionAlive = False
-        self.bitfield = set()
-        self.isDownloading = False
-
     def downloadBlock(self, pieceNumber, offset, blockLength):
+        """
+        Sends request message for block and checks if piece is found in response and returns it.
+        """
         if self.isHandshakeDone == False:
             logger.info("hndshake not done .....")
             return b''
@@ -548,3 +571,9 @@ class Peer(PeerWireProtocol):
                     logger.info("Invalid Request for block")
         if self.isSeeding == False:
             self.sendMsg(0)
+
+    def disconnectPeer(self):
+        self.isHandshakeDone = False
+        self.isConnectionAlive = False
+        self.bitfield = set()
+        self.isDownloading = False

@@ -37,8 +37,12 @@ class FileInfo:
         self.announceList = []
         self.peerAddresses = []
         self.numberOfPieces = 0
+        self.numwant = 50
 
     def extractIPAdressandPort(self, ipAndPortString):
+        """
+            Extract IP and port from 6 byte
+        """
         port = int.from_bytes(ipAndPortString[-2:], "big")
         ipAddress = ""
         ip = list(map(str, ipAndPortString[:4]))
@@ -46,6 +50,9 @@ class FileInfo:
         return (ipAddress, port)
 
     def _generate_peers(self):
+        """
+            extract peers from binary to a list
+        """
         allPeers = []
         previous = 0
         for i in range(6, len(self.trackerPeers) + 6, 6):
@@ -54,6 +61,9 @@ class FileInfo:
         return allPeers
 
     def _generate_infoHash(self):
+        """
+            Generate Info Hash from bencoded info dictonary
+        """
         infoDictionaryBencode = bencodepy.encode(self.infoDictionary)
         infoHash = hashlib.sha1(infoDictionaryBencode).digest()
         return infoHash
@@ -66,12 +76,14 @@ class FileInfo:
             previous = i
 
     def extractFileMetaData(self):
-        # print("FileName : ", self.fileName)
+        """
+            Extract metadata from torrent file
+        """
+
         fp = open(self.fileName, "rb")
         fileContent = bencodepy.decode(fp.read())
         if b"announce" in fileContent:
             self.announceURL = fileContent[b"announce"].decode()
-
         self.infoDictionary = fileContent[b"info"]
         self.nameOfFile = self.infoDictionary[b"name"].decode()
         self.pieces = self.infoDictionary[b"pieces"]
@@ -103,14 +115,17 @@ class FileInfo:
 
 
 class httpTracker(FileInfo):
+    """
+        Class for http tracker
+    """
+
     def __init__(self, fileName):
         super().__init__(fileName)
         super().extractFileMetaData()
 
     def httpTrackerRequest(self):
-
         params = {"info_hash": self.infoHash, "peer_id": self.peerID, "port": self.portNo, "uploaded": self.uploaded,
-                  "downloaded": self.downloaded, "left": self.lengthOfFileToBeDownloaded, "compact": 1}
+                  "downloaded": self.downloaded, "left": self.lengthOfFileToBeDownloaded, "compact": 1, "numwant": self.numwant}
         try:
             announceResponse = requests.get(
                 self.announceURL, params, timeout=10).content
@@ -123,8 +138,6 @@ class httpTracker(FileInfo):
         except:
             logger.info("Unable to decode tracker response")
             return False
-
-        # if 'complete' in tracekerResponseDict:
         if b'complete' in trackerResponseDict:
             self.seeders = trackerResponseDict[b"complete"]
         if b'incomplete' in trackerResponseDict:
@@ -133,6 +146,7 @@ class httpTracker(FileInfo):
             self.trackerInterval = trackerResponseDict[b"interval"]
 
         self.trackerPeers = trackerResponseDict[b"peers"]
+        # dictionary model
         if isinstance(self.trackerPeers, list):
             for peer in self.trackerPeers:
                 self.peerAddresses.append((peer[b'ip'], peer[b'port']))
@@ -146,8 +160,9 @@ class httpTracker(FileInfo):
 
 class udpTracker(FileInfo):
     """
-    https://www.libtorrent.org/udp_tracker_protocol.html
-    http://xbtt.sourceforge.net/udp_tracker_protocol.html
+        Class for udp tracker
+        https://www.libtorrent.org/udp_tracker_protocol.html
+        http://xbtt.sourceforge.net/udp_tracker_protocol.html
     """
 
     def __init__(self, fileName):
@@ -166,6 +181,7 @@ class udpTracker(FileInfo):
         self.connectionSocket = socket(AF_INET, SOCK_DGRAM)
         self.url = parsedURL.netloc.split(":")[0]
         self.trackerPort = parsedURL.port
+        # connectionID is fixed number
         connectionID = 0x41727101980
         action = 0
         transactionID = random.randint(5, 1000)
@@ -178,6 +194,7 @@ class udpTracker(FileInfo):
             return False
         self.actionID, self.transactionID, self.connectionID = struct.unpack(
             "!iiq", reply)
+        # validation
         if(len(reply) < 16 or self.actionID != 0 or transactionID != self.transactionID):
             # error
             return False
@@ -188,16 +205,12 @@ class udpTracker(FileInfo):
         reply = self.udprecvTrackerResponse(announcePacket)
         if reply == "":
             return False
-
         announceActionID, transactionID, self.interval, self.leechers, self.seeders = struct.unpack(
             "!iiiii", reply[:20])
-
         if(len(reply) < 20 or announceActionID != 1 or transactionID != self.transactionID):
             # error
             return False
-
         self.trackerPeers = reply[20:]
-
         allPeers = self._generate_peers()
         # if tracker didnt has any peers
         if len(allPeers) == 0:
@@ -206,7 +219,6 @@ class udpTracker(FileInfo):
         for i in allPeers:
             self.peerAddresses.append(self.extractIPAdressandPort(i))
         logger.info(str(self.peerAddresses))
-
         return True
 
     def udprecvTrackerResponse(self, message):
@@ -238,6 +250,6 @@ class udpTracker(FileInfo):
         # any random key
         announcePacket += struct.pack("!I", random.randint(0, 1000))
         # Number of peers to be connected, -1 for default number of peers
-        announcePacket += struct.pack("!i", -1)
+        announcePacket += struct.pack("!i", self.numwant)
         announcePacket += struct.pack("!H", self.portNo)
         return announcePacket

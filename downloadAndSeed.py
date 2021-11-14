@@ -10,11 +10,14 @@ from Stats import *
 
 
 class downloadAndSeed():
-
     def __init__(self, allPeers, torrentFileInfo, parentDir="./"):
         self.allBitfields = {}
-        # self.fileDescriptor = open(torrentFileInfo.nameOfFile, "wb+")
+        # {
+        # pieceNumber1:[peerNumber1,peerNumber2,...]
+        # pieceNumber2:[peerNumber1,peerNumber2,...]
+        # }
         self.lengthOfFileToBeDownloaded = torrentFileInfo.lengthOfFileToBeDownloaded
+        # list of peers, thus allPeers[allBitfields[<pieceNumber>][0]] will give peer object
         self.allPeers = allPeers
         self.downloadedPiecesBitfields = set()
         self.downloadLock = Lock()
@@ -27,6 +30,9 @@ class downloadAndSeed():
         self.stats = Stats(torrentFileInfo)
 
     def getBitfield(self, peerNumber):
+        """
+            Doing handshake with peers and getting bitfields
+        """
         retry = 0
         peer = self.allPeers[peerNumber]
         while(1):
@@ -46,16 +52,23 @@ class downloadAndSeed():
                 self.downloadLock.release()
                 break
             else:
+                # Retry 3 time if handshake failed
                 retry += 1
                 if retry > 3:
                     break
 
     def isDownloadRemaining(self):
+        """
+            Check for downloading progress
+        """
         if self.torrentFileInfo.numberOfPieces != len(self.downloadedPiecesBitfields):
             return True
         return False
 
     def rarestPieceFirstSelection(self):
+        """
+            Rarest Piece First piece selection stratergy 
+        """
         rarestPieces = []
         if len(self.allBitfields) == 0:
             return rarestPieces
@@ -69,6 +82,9 @@ class downloadAndSeed():
         return rarestPieces
 
     def createPeerThreads(self):
+        """
+            Calls getfield function of new peers
+        """
         peerNumber = 0
         while(peerNumber+self.peerThreadCreatedCount < len(self.allPeers)):
             if peerNumber > 20:
@@ -80,9 +96,13 @@ class downloadAndSeed():
         self.peerThreadCreatedCount += peerNumber
 
     def download(self):
+        """
+        Function to create required files and threads
+        """
         self.fileHandler.createFiles()
         self.createPeerThreads()
         while self.isDownloadRemaining():
+            # Selecting rarest piece
             rarestPieces = self.rarestPieceFirstSelection()
             if len(rarestPieces) == 0:
                 continue
@@ -90,6 +110,7 @@ class downloadAndSeed():
                 logger.info(str(self.allBitfields))
             allDownloadingThreads = []
             for pieceNumber in rarestPieces:
+                # Selecting peer for piece to download
                 peer = self.peerSelection(pieceNumber)
                 if peer == None:
                     continue
@@ -98,6 +119,7 @@ class downloadAndSeed():
                 allDownloadingThreads.append(thread)
                 thread.start()
             count = 0
+            # Waiting for previously requested pieces
             for thread in allDownloadingThreads:
                 thread.join()
                 count += 1
@@ -114,6 +136,7 @@ class downloadAndSeed():
         peer.isDownloading = False
         if isPieceDownloaded == False:
             return
+        # Acquiring lock and updating shared resources
         self.downloadLock.acquire()
         self.downloadedPiecesBitfields.add(pieceNumber)
         self.stats.setDownloadSpeed(pieceNumber)
@@ -124,9 +147,13 @@ class downloadAndSeed():
                     str(len(self.downloadedPiecesBitfields)))
 
     def seeding(self):
+        """
+            Function to do seeding
+        """
         self.clientPeer.startSeeding()
         leechers = {}
         while True:
+            # Accept incoming connection
             connectionRecieved = self.clientPeer.acceptConnection()
             logger.info("connection recvd " + str(connectionRecieved))
             if connectionRecieved != None:
@@ -137,12 +164,14 @@ class downloadAndSeed():
                 leechers[peerAddress] = peerInstance
                 if len(self.connectedPeers) < 4 or len(leechers.keys()) < 4:
                     continue
-                # Top four Algorithm
+                # Seeding according to Top four Algorithm
                 self.seedToTop4Peers(leechers)
 
-    def seedToTop4Peers(self, leechers, seedingTo):
+    def seedToTop4Peers(self, leechers):
+        # sorting peers according to their contribution in downloading
         self.connectedPeers.sort(key=self.comparator, reverse=True)
         seedingTo = {}
+        # Selecting 3 fasted downloadind ans 1 random peer for seeding
         for i in range(4):
             if i != 3:
                 peer = self.connectedPeers[i]
@@ -156,15 +185,22 @@ class downloadAndSeed():
                     target=leechers[peerAddress].uploadInitiator)
                 thread.start()
                 seedingTo[peerAddress] = leechers.pop(peerAddress)
+        # Waiting for 60 sec
         time.sleep(60)
+        # Stop seeding to peers
         for peerAddress in seedingTo.keys():
             seedingTo[peerAddress].isSeeding = False
             leechers[peerAddress] = seedingTo.pop(peerAddress)
 
     def peerSelection(self, pieceNumber):
+        """
+            Peer selection stratergy
+        """
+        # shuffling peers
         random.shuffle(self.allBitfields[pieceNumber])
         for peerNumber in self.allBitfields[pieceNumber]:
             peer = self.allPeers[peerNumber]
+            # checking
             if not peer.isDownloading and peer.isConnectionAlive and peer.isHandshakeDone:
                 if not peer.isConnectionAlive or not peer.isHandshakeDone:
                     Thread(target=self.getBitfield,

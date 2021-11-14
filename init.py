@@ -1,12 +1,18 @@
+import os
+import math
+import argparse
 from downloadAndSeed import *
 from threading import Thread, Timer
 from peerWireProtocol import *
 from torrentFile import *
-import math
 from loggerConfig import logger, logging
-import argparse
-import os
 from beautifultable import BeautifulTable
+interval = 20
+ALLOW_SEEDING = True
+MAX_INTERVAL = 180
+MAX_PEER = 50
+
+# Type checkers for command line arguments
 
 
 def speedChecker(speed):
@@ -29,6 +35,7 @@ def peerChecker(peerNo):
     return peerNo
 
 
+# Handling command line arguments
 description = "                             KKTorrent                             "
 epilog = """Contributors:
                 111903039: Kartik Mandhan
@@ -63,14 +70,15 @@ if args["noseed"]:
     ALLOW_SEEDING = False
 if args["debug"]:
     logger.setLevel(logging.INFO)
-
-interval = 20
-ALLOW_SEEDING = True
-MAX_INTERVAL = 180
+if args["maxpeer"]:
+    MAX_PEER = args["maxpeer"]
 
 
 def setInterval(func, sec):
-    """ https://stackoverflow.com/questions/2697039/python-equivalent-of-setinterval"""
+    """
+        Calls passed function repeatedly after sec argument
+        https://stackoverflow.com/questions/2697039/python-equivalent-of-setinterval
+    """
     def func_wrapper():
         setInterval(func, sec)
         func()
@@ -81,9 +89,13 @@ def setInterval(func, sec):
 
 
 def tryAllTrackerURLs(udpRequestMaker, httpRequestMaker):
+    """
+        Get peers list from all trackers in announce list
+    """
     didWeRecieveAddresses = False
     didUDPAnswer = -1
     for url in torrentFileData.announceList:
+        # if udp tracker
         if "udp://" in url:
             udpRequestMaker.announceURL = url
             if(udpRequestMaker.udpTrackerRequest()):
@@ -99,12 +111,15 @@ def tryAllTrackerURLs(udpRequestMaker, httpRequestMaker):
                 break
     return (didWeRecieveAddresses, didUDPAnswer)
 
-# this returns empty list once all pieces are requested
-
 
 def getPeers():
+    """
+        Returns peers list got from tracker
+    """
     udpRequestMaker = udpTracker(fileName)
+    udpRequestMaker.numwant = MAX_PEER
     httpRequestMaker = httpTracker(fileName)
+    httpRequestMaker.numwant = MAX_PEER
     didWeRecieveAddresses = False
     didUDPAnswer = -1
     if len(torrentFileData.announceList) > 0:
@@ -141,21 +156,23 @@ def getPeers():
         return [], False
 
 
-def convertSize(size_bytes):
-    """https://stackoverflow.com/questions/5194057/better-way-to-convert-file-sizes-in-python"""
-    if size_bytes == 0:
+def convertSize(sizeBytes):
+    """
+        Convert size of file
+        https://stackoverflow.com/questions/5194057/better-way-to-convert-file-sizes-in-python
+    """
+    if sizeBytes == 0:
         return "0B"
     sizeName = ("B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB")
-    i = int(math.floor(math.log(size_bytes, 1024)))
+    i = int(math.floor(math.log(sizeBytes, 1024)))
     p = math.pow(1024, i)
-    s = round(size_bytes / p, 2)
+    s = round(sizeBytes / p, 2)
     return "%s %s" % (s, sizeName[i])
 
 
 def createTable():
     t = BeautifulTable()
     t.rows.append([torrentFileData.nameOfFile])
-
     t.rows.append(
         [convertSize(torrentFileData.lengthOfFileToBeDownloaded)])
     t.rows.append([str(downloader.stats.avgDownloadSpeed)+" kbps"])
@@ -168,8 +185,11 @@ def createTable():
 
 
 def updateProgress():
+    """
+        Show progress of torrent on command line 
+    """
     while True:
-        # os.system("clear")
+        os.system("clear")
         t = createTable()
         print(t)
         print("[{0}] {1}%".format("#" * math.floor(downloader.stats.percentdownloaded),
@@ -184,7 +204,10 @@ def updateProgress():
             return
 
 
-def wrapper():
+def makeRequest():
+    """
+        Get peers from tracker and update allPeers
+    """
     global downloader
     global interval
     logger.info("\n\n\n\nwraper called\n\n\n\n")
@@ -204,14 +227,18 @@ def wrapper():
         interval += 10
 
 
-def makeRequest():
+def main():
+    """
+        Main function 
+    """
     k = Thread(target=updateProgress)
     k.start()
     global downloader
     global interval
     workingPeers, gotPeers = getPeers()
-    t = setInterval(wrapper, interval)
+    t = setInterval(makeRequest, interval)
     if(gotPeers):
+        # adding peers in downloader object
         downloader.allPeers.extend(workingPeers)
         if ALLOW_SEEDING:
             seeding = Thread(target=downloader.seeding)
@@ -221,4 +248,4 @@ def makeRequest():
         downloader.download()
 
 
-makeRequest()
+main()
