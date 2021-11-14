@@ -54,17 +54,17 @@ args = vars(parser.parse_args())
 fileName = args['filename']
 torrentFileData = FileInfo(fileName)
 torrentFileData.extractFileMetaData()
-if "download" in args:
+if args["download"]:
     DOWNLOAD_PATH = args["download"]
     # print(DOWNLOAD_PATH)
     downloader = downloadAndSeed([], torrentFileData, DOWNLOAD_PATH)
 else:
     downloader = downloadAndSeed([], torrentFileData)
 
-if "noseed" in args:
+if args["noseed"]:
     ALLOW_SEEDING = False
-if "debug" in args:
-    logger.setLevel(logging.CRITICAL)
+if args["debug"]:
+    logger.setLevel(logging.INFO)
 
 interval = 20
 ALLOW_SEEDING = True
@@ -167,9 +167,9 @@ def createTable():
     t.rows.append([str(downloader.stats.avgDownloadSpeed)+" kbps"])
     t.rows.append([str(downloader.stats.remainingTime)+" s"])
     t.rows.append(
-        [convertSize(torrentFileData.pieceLength*torrentFileData.numberOfPieces)])
+        [convertSize(torrentFileData.pieceLength*downloader.stats.numOfPiecesDownloaded)])
     t.rows.header = ["FileName", "Size",
-                     "Average Download Speed", "Time Remaining (ETA)", "Downloaded Pieces Count"]
+                     "Average Download Speed", "Time Remaining (ETA)", "Downloaded File Size"]
     return t
 
 
@@ -183,7 +183,8 @@ def updateProgress():
         time.sleep(2)
         if not downloader.isDownloadRemaining():
             os.system("clear")
-            t.rows[3] = convertSize(torrentFileData.lengthOfFileToBeDownloaded)
+            t.rows[4] = [convertSize(
+                torrentFileData.lengthOfFileToBeDownloaded)]
             print(t)
             print("[{0}] {1}%".format("#" * 100, 100))
             return
